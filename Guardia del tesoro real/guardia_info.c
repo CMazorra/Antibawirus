@@ -36,6 +36,17 @@ typedef struct{
    ProcessTracker* tracker;
 }ThreadArgs;
 
+int lista_blanca(const char* name)
+{
+ const char* lista[] = {"systemd", "kthreadd", "rcu_sched", "gnome-shell","sshd", NULL};
+ for (int i = 0; lista[i] != NULL; i++)
+ {
+   if(strcmp(name, lista[i]) == 0)
+    return 1;
+   
+   return 0;
+ }
+}
 int pid_exists(const char* pid)
 {
    char path[256];
@@ -91,11 +102,11 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
 
          long mem_us = memory - tracker -> processes[i].prev_memory; 
 
-         if(cpu_us > UmbralCPU)
+         if(cpu_us > UmbralCPU && !lista_blanca(name))
          {
             printf("⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us);
          }
-         if(mem_us > UmbralMem / 2)
+         if(mem_us > UmbralMem / 2 && !lista_blanca(name))
          {
             printf("⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us); 
          }
@@ -204,10 +215,16 @@ void process_info(const char* pid, ProcessTracker *tracker)
  
  update_process(tracker, pid, name, current_proc_time, current_total_cpu, rss, &cpu, &delta_proc);
 
- if(cpu > UmbralCPU)
+ if(cpu > UmbralCPU && !lista_blanca(name))
  {
   printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
  }
+
+  if(rss * 4 > UmbralMem && !lista_blanca(name))
+ {
+  printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
+ }
+ 
  
  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
          pid, name, cpu, delta_proc ,rss * 4, vsize, threads);
