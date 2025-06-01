@@ -7,64 +7,12 @@
 #include <errno.h>
 #include <time.h>
 #include <pthread.h>
+#include "monitor.h"
 
 #define UmbralCPU 10.0
 #define UmbralMem 100000
 
 pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-typedef struct 
-{
-   char pid[16];
-   char name[256];
-   float prev_cpu;
-   long prev_memory;
-   int prev_alert;
-   long prev_proc_time;
-   long prev_total_cpu;
-} ProcessHistory;
-
-typedef struct
-{
-   ProcessHistory *processes;
-   int count;
-   int capacity;
-}ProcessTracker;
-
-typedef struct{
-   char pid[16];
-   ProcessTracker* tracker;
-}ThreadArgs;
-
-int lista_blanca(const char* name)
-{
- const char* lista[] = {"systemd", "kthreadd", "rcu_sched", "gnome-shell","sshd", NULL};
- for (int i = 0; lista[i] != NULL; i++)
- {
-   if(strcmp(name, lista[i]) == 0)
-    return 1;
-   
-   return 0;
- }
-}
-int pid_exists(const char* pid)
-{
-   char path[256];
-   snprintf(path, sizeof(path), "/proc/%s", pid);
-   return (access(path, F_OK) == 0);
-}
-
-void init_tracker(ProcessTracker *tracker)
-{
-   tracker -> processes = malloc(32*sizeof(ProcessHistory));
-   if(!tracker->processes)
-   {
-      perror("error al asignar memoria");
-      exit(EXIT_FAILURE);
-   }
-   tracker->count = 0;
-   tracker ->capacity = 32;
-}
 
 void cleanup(ProcessTracker *tracker)
 {
@@ -96,19 +44,21 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
          float cpu_us = 0.0;
          long delta_total = current_total_cpu - tracker->processes[i].prev_total_cpu;
          long delta_proc = current_proc_time - tracker->processes[i].prev_proc_time;
+         long clock_ticks = sysconf(_SC_CLK_TCK);
+         int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
          if(delta_total > 0)
-          cpu_us = (delta_proc * 100)/delta_total;
+          cpu_us = ((float)delta_proc / delta_total) * num_cpus * 100.0;
 
          long mem_us = memory - tracker -> processes[i].prev_memory; 
 
-         if(cpu_us > UmbralCPU && !lista_blanca(name))
+         if(cpu_us - tracker->processes[i].prev_cpu > UmbralCPU && !lista_blanca(name))
          {
-            printf("⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us);
+            printf("⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us-tracker->processes[i].prev_cpu);
          }
-         if(mem_us > UmbralMem / 2 && !lista_blanca(name))
+         if(mem_us - tracker->processes[i].prev_memory > UmbralMem / 2 && !lista_blanca(name))
          {
-            printf("⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us); 
+            printf("⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us- tracker->processes[i].prev_memory); 
          }
 
          tracker->processes[i].prev_cpu = cpu_us;
@@ -118,7 +68,8 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
 
          *cpu_out = cpu_us;
          *delta_proc_out = delta_proc;
-         return;
+          pthread_mutex_unlock(&tracker_mutex);
+          return;
       }
    }
 
@@ -148,22 +99,7 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
    *cpu_out = 0.0;
    *delta_proc_out = 0;
    pthread_mutex_unlock(&tracker_mutex);
-
-}
-
-long get_cpu_time() 
-{
-    FILE* file = fopen("/proc/stat", "r");
-    if (!file)
-    {
-      perror("Error al abrir /proc/stat");
-      return 0;
-    } 
-
-    long user, nice, system, idle;
-    fscanf(file, "cpu %ld %ld %ld %ld", &user, &nice, &system, &idle);
-    fclose(file);
-    return user + nice + system + idle;
+   return;
 }
 
 void process_info(const char* pid, ProcessTracker *tracker)
@@ -188,16 +124,29 @@ void process_info(const char* pid, ProcessTracker *tracker)
     fclose(file);
  }
 
- //CPU and memory
- snprintf(path, sizeof(path), "/proc/%s/stat",pid);
- file = fopen(path, "r");
- if(file)
- {
-  fscanf(file, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu %*d %*d %*d %*d %*d %*d %*u %lu %ld",
-        &utime, &stime,&start_time, &rss);
-  fclose(file);      
- }
+ //CPU
+snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+    file = fopen(path, "r");
+    if (file) {
+        int skip;
+        char comm[256], state;
+        unsigned long dummy;
+        fscanf(file, "%d %s %c", &skip, comm, &state);
+        // Skip next 11 fields
+        for (int i = 0; i < 11; i++)
+            fscanf(file, "%lu", &dummy);
+        fscanf(file, "%lu %lu", &utime, &stime);
+        fclose(file);
+    }
 
+ //Memory
+ snprintf(path, sizeof(path), "/proc/%s/statm", pid);
+    file = fopen(path, "r");
+    if (file) {
+        fscanf(file, "%*s %ld", &rss);
+        fclose(file);
+        rss *= sysconf(_SC_PAGESIZE) / 1024; 
+    }
  //virtual memory
  snprintf(path, sizeof(path), "/proc/%s/statm",pid);
  file = fopen(path, "r");
@@ -209,26 +158,33 @@ void process_info(const char* pid, ProcessTracker *tracker)
  }
 
  long current_proc_time = utime + stime;
+//  printf("current proc time: %6lu \n", current_proc_time);
  long current_total_cpu = get_cpu_time();
  float cpu = 0.0;
  long delta_proc = 0;
  
  update_process(tracker, pid, name, current_proc_time, current_total_cpu, rss, &cpu, &delta_proc);
 
- if(cpu > UmbralCPU && !lista_blanca(name))
- {
+  if(cpu > UmbralCPU && !lista_blanca(name))
+  {
   printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
- }
+  }
 
-  if(rss * 4 > UmbralMem && !lista_blanca(name))
+  if(rss > UmbralMem && !lista_blanca(name))
  {
-  printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
+  printf("\n🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
  }
  
+ long clk_ticks = sysconf(_SC_CLK_TCK);
+ float delta_proc_sec = (float)delta_proc / clk_ticks;
+
+ printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8.2f s | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
+         pid, name, cpu, delta_proc_sec, rss, vsize, threads);
  
- printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
-         pid, name, cpu, delta_proc ,rss * 4, vsize, threads);
+//  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
+//          pid, name, cpu, delta_proc ,rss, vsize, threads);
 }
+
 void* process_info_thread(void* arg)
 {
    ThreadArgs* args = (ThreadArgs*)arg;
@@ -289,7 +245,7 @@ int main()
     }
     closedir(dir);
 
-    sleep(2);
+    sleep(10);
    }
    
    free(tracker.processes);

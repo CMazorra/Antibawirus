@@ -110,3 +110,42 @@
 //    tracker->processes[tracker->count].prev_memory = memory;
 //    tracker->count++;
 //  }
+
+//  snprintf(path, sizeof(path), "/proc/%s/stat",pid);
+//  file = fopen(path, "r");
+//  if(file)
+//  {
+//   fscanf(file, "%*d %*s %*c %*d %*d %*d %*d %*d %*u %*u %*u %*u %*u %lu %lu %*d %*d %*d %*d %*d %*d %*u %lu %ld",
+//         &utime, &stime,&start_time, &rss);
+//   fclose(file);      
+//  }
+
+//long get_cpu_time() 
+//{
+//    FILE* file = fopen("/proc/stat", "r");
+//    if (!file)
+//    {
+//      perror("Error al abrir /proc/stat");
+//      return 0;
+//    } 
+
+//    long user, nice, system, idle;
+//    fscanf(file, "cpu %ld %ld %ld %ld", &user, &nice, &system, &idle);
+   // fclose(file);
+ //   return user + nice + system + idle;
+//}
+
+//snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+//file = fopen(path, "r");
+//if (file) {
+////int skip;
+////char comm[256], state;
+////unsigned long dummy;
+////fscanf(file, "%d %s %c", &skip, comm, &state);
+////// Skip next 11 fields
+////for (int i = 0; i < 11; i++)
+//////fscanf(file, "%lu", &dummy);
+////fscanf(file, "%lu %lu", &utime, &stime);
+////fclose(file);
+  //  }
+        
