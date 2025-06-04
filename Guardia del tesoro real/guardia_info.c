@@ -126,18 +126,23 @@ void process_info(const char* pid, ProcessTracker *tracker)
 
  //CPU
 snprintf(path, sizeof(path), "/proc/%s/stat", pid);
+    sprintf(path, "/proc/%s/stat", pid);
     file = fopen(path, "r");
-    if (file) {
-        int skip;
-        char comm[256], state;
-        unsigned long dummy;
-        fscanf(file, "%d %s %c", &skip, comm, &state);
-        // Skip next 11 fields
-        for (int i = 0; i < 11; i++)
-            fscanf(file, "%lu", &dummy);
-        fscanf(file, "%lu %lu", &utime, &stime);
-        fclose(file);
+    if (!file) {
+        perror("Error al abrir /proc/[pid]/stat");
     }
+
+    fgets(line, sizeof(line), file);
+    fclose(file);
+
+    // Saltar hasta el campo 14 (utime) y 15 (stime)
+    char *ptr = line;
+    int i;
+    for (i = 0; i < 13; i++) {
+        ptr = strchr(ptr, ' ') + 1;
+    }
+    sscanf(ptr, "%ld %ld", &utime, &stime);
+
 
  //Memory
  snprintf(path, sizeof(path), "/proc/%s/statm", pid);
