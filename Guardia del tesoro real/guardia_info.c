@@ -33,7 +33,7 @@ void cleanup(ProcessTracker *tracker)
 }
 
 void update_process(ProcessTracker *tracker, const char*pid, const char*name, long current_proc_time,
-                    long current_total_cpu, long memory, float* cpu_out, long* delta_proc_out)
+                    long current_total_cpu, long memory, float* cpu_out, long* delta_proc_out, float ram_percent)
 {
    pthread_mutex_lock(&tracker_mutex);
 
@@ -60,11 +60,16 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
          {
             printf("⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us- tracker->processes[i].prev_memory); 
          }
+         if(ram_percent - tracker->processes[i].prev_ram_percent > 10.0 && !lista_blanca)
+         {
+            printf("⚠️ [RAM%%] %s (PID: %s) +%.2f%%\n", name, pid, ram_percent - tracker->processes[i].prev_ram_percent);
+         }
 
          tracker->processes[i].prev_cpu = cpu_us;
          tracker->processes[i].prev_memory = memory;
          tracker->processes[i].prev_proc_time = current_proc_time;
          tracker->processes[i].prev_total_cpu = current_total_cpu;
+         tracker->processes[i].prev_ram_percent = ram_percent;
 
          *cpu_out = cpu_us;
          *delta_proc_out = delta_proc;
@@ -109,7 +114,7 @@ void process_info(const char* pid, ProcessTracker *tracker)
  long utime = 0, stime=0, start_time = 0, rss = 0, vsize = 0;
  int threads = 0;
 
- //Name and thread amount of the processes
+ //Name, rss and thread amount of the processes
  snprintf(path, sizeof(path), "/proc/%s/status",pid);
  file = fopen(path, "r");
  if(file)
@@ -120,6 +125,8 @@ void process_info(const char* pid, ProcessTracker *tracker)
          sscanf(line, "Name:\t%s", name);
         else if(strncmp(line, "Threads:", 8) == 0)
          sscanf(line, "Threads:\t%d", &threads); 
+        else if(strncmp(line, "VmRSS:", 6) == 0)
+         sscanf(line, "VmRSS: %ld KB", &rss);  
     }
     fclose(file);
  }
@@ -144,14 +151,14 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
     sscanf(ptr, "%ld %ld", &utime, &stime);
 
 
- //Memory
- snprintf(path, sizeof(path), "/proc/%s/statm", pid);
-    file = fopen(path, "r");
-    if (file) {
-        fscanf(file, "%*s %ld", &rss);
-        fclose(file);
-        rss *= sysconf(_SC_PAGESIZE) / 1024; 
-    }
+//  //Memory
+//  snprintf(path, sizeof(path), "/proc/%s/statm", pid);
+//     file = fopen(path, "r");
+//     if (file) {
+//         fscanf(file, "%*s %ld", &rss);
+//         fclose(file);
+//         rss *= sysconf(_SC_PAGESIZE) / 1024; 
+//     }
  //virtual memory
  snprintf(path, sizeof(path), "/proc/%s/statm",pid);
  file = fopen(path, "r");
@@ -162,13 +169,14 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
   vsize *= sysconf(_SC_PAGESIZE) / 1024;
  }
 
- long current_proc_time = utime + stime;
-//  printf("current proc time: %6lu \n", current_proc_time);
+ long current_proc_time = utime + stime;  
  long current_total_cpu = get_cpu_time();
  float cpu = 0.0;
  long delta_proc = 0;
+ long total_ram = get_total_ram();
+ float ram_percent = total_ram > 0 ? ((float)rss / total_ram) * 100.0 : 0.0;
  
- update_process(tracker, pid, name, current_proc_time, current_total_cpu, rss, &cpu, &delta_proc);
+ update_process(tracker, pid, name, current_proc_time, current_total_cpu, rss, &cpu, &delta_proc,ram_percent);
 
   if(cpu > UmbralCPU && !lista_blanca(name))
   {
@@ -183,8 +191,8 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
  long clk_ticks = sysconf(_SC_CLK_TCK);
  float delta_proc_sec = (float)delta_proc / clk_ticks;
 
- printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8.2f s | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
-         pid, name, cpu, delta_proc_sec, rss, vsize, threads);
+ printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8.2f s | RAM: %6ld KB (%.2f%%) | %6lu KB (Virtual) | Hilo: %d\n",
+         pid, name, cpu, delta_proc_sec, rss, ram_percent, vsize, threads);
  
 //  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
 //          pid, name, cpu, delta_proc ,rss, vsize, threads);

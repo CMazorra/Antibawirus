@@ -54,4 +54,21 @@ long get_cpu_time()
     return user + nice + system + idle;
 }
 
+long get_total_ram()
+{
+   FILE* file = fopen("/proc/meminfo", "r");
+   if(!file) return 0;
 
+   char line[256];
+   long mem_total = 0;
+   while(fgets(line, sizeof(line), file))
+   {
+      if(strncmp(line, "MemTotal:", 9) == 0)
+      {
+         sscanf(line, "MemTotal: %ld KB", &mem_total);
+         break;
+      }
+   }
+   fclose(file);
+   return mem_total;
+}
