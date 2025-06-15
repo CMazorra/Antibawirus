@@ -1,0 +1,21 @@
+window {
+    background-color: #1e1e2e;
+    color: rgb(255, 246, 246);
+    font-family: Monospace;
+    font-size: 14px;
+}
+
+button {
+    background-color: #4caf50;
+    color: rgb(18, 17, 17);
+    border-radius: 8px;
+}
+
+textview {
+    background-color: #2b2b3b;
+    color: #ffffff;
+}
+window {
+    background-image: url("fondo.png");
+    background-size: cover;
+}
