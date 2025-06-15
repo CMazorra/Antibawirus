@@ -1,0 +1,38 @@
+#!/bin/bash
+
+DIR="/media/adrianux/ADRI"
+USER=$(whoami)
+
+echo "Verificando si $DIR está montado..."
+
+MOUNT_INFO=$(mount | grep "$DIR")
+
+if [ -z "$MOUNT_INFO" ]; then
+  echo "La ruta $DIR no está montada."
+  exit 1
+fi
+
+echo "Información de montaje:"
+echo "$MOUNT_INFO"
+
+if echo "$MOUNT_INFO" | grep -q "ro,"; then
+  echo "La unidad está montada como solo lectura. Intentando remontar como lectura-escritura..."
+  sudo mount -o remount,rw "$DIR"
+  if [ $? -ne 0 ]; then
+    echo "No se pudo remontar $DIR como lectura-escritura. Verifica permisos y estado del disco."
+    exit 1
+  fi
+  echo "Unidad remontada en modo lectura-escritura."
+else
+  echo "La unidad ya está montada en modo lectura-escritura."
+fi
+
+echo "Cambiando dueño de $DIR a $USER..."
+sudo chown "$USER":"$USER" "$DIR"
+
+echo "Dando permisos de escritura al usuario..."
+sudo chmod u+w "$DIR"
+
+echo "¡Listo! Ahora deberías poder escribir en $DIR."
+
+
