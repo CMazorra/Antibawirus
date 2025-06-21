@@ -12,6 +12,9 @@ GtkWidget *button2;
 GtkWidget *button3;
 GtkWidget *button4;
 GtkWidget *exit_button;
+GtkWidget *entry_start_port;
+GtkWidget *entry_end_port;
+
 
 void on_hide_text(GtkButton *btn, gpointer user_data) {
     gtk_widget_hide(scroll);
@@ -29,23 +32,34 @@ void on_scan_clicked(GtkButton *btn, gpointer user_data)
 }
 
 void on_scan_port_clicked(GtkButton *btn, gpointer user_data) {
+    const gchar *start_text = gtk_entry_get_text(GTK_ENTRY(entry_start_port));
+    const gchar *end_text   = gtk_entry_get_text(GTK_ENTRY(entry_end_port));
+
+    if (start_text[0] == '\0' || end_text[0] == '\0') {
+        gtk_text_buffer_set_text(buffer, "Debe especificar ambos puertos.\n", -1);
+        return;
+    }
+
+    gchar range_arg[64];
+    g_snprintf(range_arg, sizeof(range_arg), "%s-%s", start_text, end_text);
+
+    gchar cmd[256];
+    g_snprintf(cmd, sizeof(cmd),"../Defensores de la muralla/scanner %s", range_arg);
+
     gtk_widget_show(scroll);
     gtk_widget_show(exit_button);
-    gtk_text_buffer_set_text(buffer, "Iniciando escaneo...\n", -1);
+    gtk_text_buffer_set_text(buffer, "Iniciando escaneo de puertos...\n", -1);
 
-    const gchar *scanner_path = "../Defensores\\ de\\ la\\ muralla/scanner";
-    FILE *fp = popen(scanner_path, "r");
-
+    FILE *fp = popen(cmd, "r");
     if (!fp) {
-        gtk_text_buffer_insert_at_cursor(buffer, "Error al ejecutar el escáner.\n", -1);
+        gtk_text_buffer_insert_at_cursor(buffer,
+            "Error al ejecutar el escáner de puertos.\n", -1);
         return;
     }
 
     char line[512];
     while (fgets(line, sizeof(line), fp)) {
         gtk_text_buffer_insert_at_cursor(buffer, line, -1);
-
-        // Refresh the interface to show the text as quick as possible
         while (gtk_events_pending())
             gtk_main_iteration();
     }
@@ -55,10 +69,11 @@ void on_scan_port_clicked(GtkButton *btn, gpointer user_data) {
 
 
 
+
 void do_all(GtkButton *btn, gpointer user_data)
 {
-    on_scan_clicked();
-    on_monitoring_clicked()
+    on_scan_clicked(btn,user_data);
+    on_monitoring_clicked(btn,user_data);
     on_scan_port_clicked(btn,user_data);
 }
 
@@ -96,6 +111,23 @@ int main(int argc, char *argv[]) {
     button3 = gtk_button_new_with_label("Iniciar Escaneo de Puertos Locales");
     g_signal_connect(button3, "clicked", G_CALLBACK(on_scan_port_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(vbox), button3, FALSE, FALSE, 5);
+
+    // Label y Entry for starting port
+    GtkWidget *hbox_ports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    GtkWidget *label_start = gtk_label_new("Puerto inicial:");
+    entry_start_port = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_start_port), "e.g. 1");
+    gtk_box_pack_start(GTK_BOX(hbox_ports), label_start, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox_ports), entry_start_port, FALSE, FALSE, 0);
+
+    // Label y Entry for ending port
+    GtkWidget *label_end = gtk_label_new("Puerto final:");
+    entry_end_port = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_end_port), "e.g. 1024");
+    gtk_box_pack_start(GTK_BOX(hbox_ports), label_end, FALSE, FALSE, 0);
+    gtk_box_pack_start(GTK_BOX(hbox_ports), entry_end_port, FALSE, FALSE, 0);
+
+    gtk_box_pack_start(GTK_BOX(vbox), hbox_ports, FALSE, FALSE, 5);
 
     //Button to do all
     button4 = gtk_button_new_with_label("Iniciar todo");

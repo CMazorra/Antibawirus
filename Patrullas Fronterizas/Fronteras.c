@@ -119,6 +119,132 @@ const char *obtener(const char *device)
     return NULL;
 }
 
+void mostrar_proceso_modificador(const char *archivo) {
+    char cmd[512];
+    // Llamamos a ausearch para capturar el bloque SYSCALL+PATH
+    snprintf(cmd, sizeof(cmd),
+             "/usr/sbin/ausearch -f \"%s\" -ts recent 2>/dev/null",
+             archivo);
+
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        fprintf(stderr, "[DEBUG] popen falló al ejecutar: %s\n", cmd);
+        return;
+    }
+
+    char line[1024];
+    char comm[128] = "(no registrado)",
+         exe[256]  = "(no registrado)",
+         tty[64]   = "(no registrado)",
+         uid[32]   = "(no registrado)",
+         ppid[32]  = "(no registrado)";  // Nuevo campo para Parent Process ID
+    int in_syscall = 0, encontrado = 0;
+
+    while (fgets(line, sizeof(line), fp)) {
+        // Detectamos el inicio del bloque SYSCALL
+        if (strstr(line, "type=SYSCALL")) {
+            in_syscall = 1;
+            encontrado = 0;  // reiniciamos por si hay varios bloques
+        }
+        if (!in_syscall) continue;
+
+        // Si es PATH, salimos del bloque tras registrarlo
+        if (strstr(line, "type=PATH")) {
+            break;
+        }
+
+        // Extraemos campos
+        char *p;
+        if ((p = strstr(line, "comm=\"")) && sscanf(p + 6, "%127[^\"]", comm) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "exe=\"")) && sscanf(p + 5, "%255[^\"]", exe) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "tty=")) && sscanf(p + 4, "%63s", tty) == 1) {
+            encontrado = 1;
+        }
+        if ((p = strstr(line, "uid=")) && sscanf(p + 4, "%31s", uid) == 1) {
+            encontrado = 1;
+        }
+        // Capturamos el PPID (Parent Process ID)
+        if ((p = strstr(line, "ppid=")) && sscanf(p + 5, "%31s", ppid) == 1) {
+            encontrado = 1;
+        }
+    }
+
+    pclose(fp);
+
+    if (encontrado) {
+        printf("   🔎 Proceso responsable de %s:\n", archivo);
+        printf("      🧠 Comando: %s\n", comm);
+        printf("      📁 Ejecutable: %s\n", exe);
+        printf("      👤 UID: %s\n", uid);
+        printf("      🖥️ TTY: %s\n", tty);
+        printf("      👨‍👦 PPID: %s\n", ppid);  // Mostramos el PPID
+
+        // Intentar obtener el comando del proceso padre
+        char parent_comm[128] = "(no registrado)";
+        char parent_cmd[256] = "(no registrado)";
+        if (strcmp(ppid, "(no registrado)") != 0) {
+            // Comando para obtener el nombre del proceso padre
+            char cmd_ps[256];
+            snprintf(cmd_ps, sizeof(cmd_ps), "ps -o comm= -p %s 2>/dev/null", ppid);
+            FILE *fp_ps = popen(cmd_ps, "r");
+            if (fp_ps && fgets(parent_comm, sizeof(parent_comm), fp_ps)) {
+                // Eliminar el salto de línea
+                parent_comm[strcspn(parent_comm, "\n")] = 0;
+            } else {
+                strcpy(parent_comm, "(error o no encontrado)");
+            }
+            pclose(fp_ps);
+
+            // Comando para obtener la línea de comando completa del proceso padre
+            snprintf(cmd_ps, sizeof(cmd_ps), "ps -o cmd= -p %s 2>/dev/null", ppid);
+            fp_ps = popen(cmd_ps, "r");
+            if (fp_ps && fgets(parent_cmd, sizeof(parent_cmd), fp_ps)) {
+                parent_cmd[strcspn(parent_cmd, "\n")] = 0;
+            } else {
+                strcpy(parent_cmd, "(error o no encontrado)");
+            }
+            pclose(fp_ps);
+        }
+
+        printf("      👨‍👦 Proceso padre: %s\n", parent_comm);
+        printf("      🪧 Línea de comando padre: %s\n", parent_cmd);
+
+        // Heurística mejorada
+        if (strcmp(tty, "(no registrado)") != 0 && strcmp(tty, "?") != 0 && strcmp(tty, "(none)") != 0) {
+            if (strstr(exe, "bash") || strstr(exe, "sh") || 
+                strstr(exe, "python") || strstr(exe, "perl")) {
+                printf("      🤖 Probablemente un script automático\n");
+            } else if (strstr(exe, "nautilus") || strstr(exe, "dolphin") || 
+                       strstr(exe, "thunar")) {
+                printf("      🗂️ Cambio a través de gestor de archivos\n");
+                printf("      ℹ️ El proceso real podría ser otro\n");
+            } else {
+                printf("      🧍 Probablemente un cambio manual (usuario en terminal)\n");
+            }
+        } else {
+            if (strstr(parent_comm, "bash") || strstr(parent_comm, "sh") || 
+                strstr(parent_comm, "python") || strstr(parent_comm, "perl")) {
+                printf("      🤖 Probablemente un script automático\n");
+            } else if (strstr(parent_comm, "java") || strstr(parent_comm, "docker") || 
+                       strstr(parent_comm, "containerd")) {
+                printf("      🐋 Probablemente un contenedor/servicio\n");
+            } else if (strstr(exe, "nautilus") || strstr(exe, "dolphin") || 
+                       strstr(exe, "thunar")) {
+                printf("      🗂️ Cambio a través de gestor de archivos\n");
+                printf("      ℹ️ El proceso real podría ser otro\n");
+            } else {
+                printf("      ❓ Origen del cambio: desconocido\n");
+            }
+        }
+    } else {
+        printf("   ⚠️ No se encontró registro de auditoría para %s\n", archivo);
+    }
+}
+
 struct udev_list_entry *actualizar(struct udev *context)
 {
     struct udev_enumerate *enumerate = udev_enumerate_new(context);
@@ -301,6 +427,7 @@ void tamano(ArchivoInfo *archivos_viejos, int cantidad_viejos, ArchivoInfo *arch
                 if (diferencia >= 10 * 1024 * 1024) // 10 MB
                 {
                     printf("El archivo %s.%s en %s ha aumentado su tamaño en %ld bytes\n", archivos_nuevos[j].nombre, archivos_nuevos[j].extension, archivos_nuevos[j].ruta_completa, diferencia);
+                    mostrar_proceso_modificador(archivos_nuevos[j].ruta_completa);
                 }
             }
         }
@@ -321,6 +448,7 @@ void extension_permisos(ArchivoInfo *archivos_viejos, int cantidad_viejos, Archi
                     if (strcmp(archivos_viejos[i].extension, archivos_nuevos[j].extension) != 0)
                     {
                         printf("El archivo %s.%s en %s ha cambiado su extencion a %s\n", archivos_viejos[i].nombre, archivos_viejos[i].extension, archivos_viejos[i].ruta_completa, archivos_nuevos[j].extension);
+                        mostrar_proceso_modificador(archivos_nuevos[j].ruta_completa);
                     }
                 }
                 if (strcmp(archivos_viejos[i].nombre, archivos_nuevos[j].nombre) == 0 && strcmp(archivos_viejos[i].extension, archivos_nuevos[j].extension) == 0 && strcmp(archivos_viejos[i].ruta_completa, archivos_nuevos[j].ruta_completa) == 0)
@@ -332,6 +460,7 @@ void extension_permisos(ArchivoInfo *archivos_viejos, int cantidad_viejos, Archi
                     if ((archivos_viejos[i].permisos & 0777) != (archivos_nuevos[j].permisos & 0777))
                     {
                         printf("El archivo %s.%s en %s ha cambiado sus permisos de %o a %o\n", archivos_viejos[i].nombre, archivos_viejos[i].extension, archivos_viejos[i].ruta_completa, archivos_viejos[i].permisos & 0777, archivos_nuevos[j].permisos & 0777);
+                        mostrar_proceso_modificador(archivos_nuevos[j].ruta_completa);
                     }
                 }
             }
@@ -352,6 +481,7 @@ void timestamps_ownership(ArchivoInfo *archivos_viejos, int cantidad_viejos, Arc
                     if (archivos_viejos[i].ultima_modificacion != archivos_nuevos[j].ultima_modificacion)
                     {
                         printf("El archivo %s.%s en %s ha cambiado su timestamps de %ld a %ld\n", archivos_viejos[i].nombre, archivos_viejos[i].extension, archivos_viejos[i].ruta_completa, archivos_viejos[i].ultima_modificacion, archivos_nuevos[j].ultima_modificacion);
+                        mostrar_proceso_modificador(archivos_nuevos[j].ruta_completa);
                     }
                 }
                 if (strcmp(archivos_viejos[i].nombre, archivos_nuevos[j].nombre) == 0 && strcmp(archivos_viejos[i].extension, archivos_nuevos[j].extension) == 0 && strcmp(archivos_viejos[i].ruta_completa, archivos_nuevos[j].ruta_completa) == 0)
@@ -359,6 +489,7 @@ void timestamps_ownership(ArchivoInfo *archivos_viejos, int cantidad_viejos, Arc
                     if (archivos_viejos[i].owner_uid != archivos_nuevos[j].owner_uid)
                     {
                         printf("El archivo %s.%s en %s ha cambiado su ownership de %d a %d\n", archivos_viejos[i].nombre, archivos_viejos[i].extension, archivos_viejos[i].ruta_completa, archivos_viejos[i].owner_uid, archivos_nuevos[j].owner_uid);
+                        mostrar_proceso_modificador(archivos_nuevos[j].ruta_completa);
                     }
                 }
             }
@@ -380,6 +511,8 @@ int copia(ArchivoInfo archivo, ArchivoInfo *archivos_viejos, int cantidad_viejos
         {
 
             printf("Posible copia detectada: %s se parece a %s\n", archivo.nombre, archivos_viejos[i].nombre);
+            mostrar_proceso_modificador(archivos_viejos[i].ruta_completa);
+            mostrar_proceso_modificador(archivo.ruta_completa);
             return 1; // se detectó una copia
         }
     }
@@ -404,6 +537,7 @@ void anadir_eliminar(ArchivoInfo *archivos_viejos, int cantidad_viejos, ArchivoI
                 if (viejos == actuales)
                 {
                     printf("El archivo %s.%s en %s ha sido eliminado\n", archivos_viejos[i].nombre, archivos_viejos[i].extension, archivos_viejos[i].ruta_completa);
+                    mostrar_proceso_modificador(archivos_viejos[i].ruta_completa);
                 }
             }
         }
@@ -425,6 +559,7 @@ void anadir_eliminar(ArchivoInfo *archivos_viejos, int cantidad_viejos, ArchivoI
                 if (copia(archivos_nuevos[i], archivos_viejos, cantidad_viejos) == 0)
                 {
                     printf("El archivo %s.%s en %s ha sido anadido\n", archivos_nuevos[i].nombre, archivos_nuevos[i].extension, archivos_nuevos[i].ruta_completa);
+                    mostrar_proceso_modificador(archivos_nuevos[i].ruta_completa);
                 }
             }
         }
@@ -433,6 +568,9 @@ void anadir_eliminar(ArchivoInfo *archivos_viejos, int cantidad_viejos, ArchivoI
 
 int main()
 {
+    if (system("systemctl is-active --quiet auditd") != 0) {
+        printf("⚠️ El servicio auditd no está activo. Los resultados pueden ser incompletos.\n");
+    }
     struct udev *context = udev_new();
     struct udev_list_entry *lista_dispositivos = actualizar(context);
     int viejos = contar_dispositivos(lista_dispositivos);
