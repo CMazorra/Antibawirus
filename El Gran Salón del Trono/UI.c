@@ -1,6 +1,7 @@
 #include <gtk/gtk.h>
-#include <gdk/gdk.h>
 #include <stdlib.h>
+#include <glib.h>
+#include <glib/gspawn.h>
 
 // Widgets globales para acceso desde funciones
 GtkWidget *window;
@@ -14,6 +15,8 @@ GtkWidget *button4;
 GtkWidget *exit_button;
 GtkWidget *entry_start_port;
 GtkWidget *entry_end_port;
+GtkWidget *entry_cpu_threshold;
+GtkWidget *entry_mem_threshold;
 
 
 void on_hide_text(GtkButton *btn, gpointer user_data) {
@@ -21,9 +24,317 @@ void on_hide_text(GtkButton *btn, gpointer user_data) {
     gtk_widget_hide(exit_button);
 }
 
+typedef struct {
+    GPid child_pid;
+    GIOChannel *io_channel;
+    GtkWidget *window;
+    GtkTextBuffer *buffer;
+} ProcessWindowData;
+
+// Estructura para pasar datos al callback
+    typedef struct {
+        GPid child_pid;
+        GIOChannel *io_channel;
+        GtkWidget *window;
+        GtkListStore *store;
+    } TableProcessData;
+
+gboolean read_guardia_info(GIOChannel *source, GIOCondition cond, gpointer data) {
+    ProcessWindowData *pdata = (ProcessWindowData *)data;
+    gchar buf[512];
+    gsize bytes_read;
+    GError *error = NULL;
+
+    GIOStatus status = g_io_channel_read_chars(source, buf, sizeof(buf) - 1, &bytes_read, &error);
+    if (status == G_IO_STATUS_NORMAL && bytes_read > 0) {
+        buf[bytes_read] = '\0';
+        gtk_text_buffer_insert_at_cursor(pdata->buffer, buf, -1);
+        return TRUE;
+    }
+    if (status == G_IO_STATUS_EOF) {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpointer data) {
+    TableProcessData *pdata = (TableProcessData *)data;
+    gchar *line = NULL;
+    gsize len = 0;
+    GError *error = NULL;
+
+    GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
+    if (status == G_IO_STATUS_NORMAL && line) {
+        // Solo procesar líneas de alerta
+        if (g_str_has_prefix(line, "ALERTA_USO_CPU") || g_str_has_prefix(line, "ALERTA_USO_Memoria")) {
+            // Espera formato: ALERTA_USO_CPU: %.2f%% (PID: %s) o ALERTA_USO_Memoria: %6ld KB (PID: %s)
+            gchar tipo[32], nombre[128], pid[32], valor[32];
+            if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2) {
+                // Puedes obtener el nombre del proceso si lo incluyes en el printf de guardia_info
+                GtkTreeIter iter;
+                gtk_list_store_append(pdata->store, &iter);
+                gtk_list_store_set(pdata->store, &iter,
+                    0, pid,      // PID
+                    1, "CPU",    // Tipo de alerta
+                    2, valor,    // Valor de CPU
+                    -1);
+            } else if (sscanf(line, "ALERTA_USO_Memoria: %31[^K] KB (PID: %31[^)])", valor, pid) == 2) {
+                GtkTreeIter iter;
+                gtk_list_store_append(pdata->store, &iter);
+                gtk_list_store_set(pdata->store, &iter,
+                    0, pid,      // PID
+                    1, "Memoria",// Tipo de alerta
+                    2, valor,    // Valor de Memoria
+                    -1);
+            }
+        }
+        g_free(line);
+        return TRUE;
+    }
+    if (status == G_IO_STATUS_EOF) {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+ // Callback para leer y parsear la salida de guardia_info
+    gboolean read_guardia_info_table(GIOChannel *source, GIOCondition cond, gpointer data) {
+    TableProcessData *pdata = (TableProcessData *)data;
+    gchar *line = NULL;
+    gsize len = 0;
+    GError *error = NULL;
+
+    GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
+    if (status == G_IO_STATUS_NORMAL && line) {
+        gchar **fields = g_strsplit(line, ";", -1);  // divide en todos los ';'
+
+if (fields[0] && fields[1] && fields[2] && fields[3] && fields[4] && fields[5]) {
+    g_strchomp(fields[5]); // elimina salto de línea del campo "hilos"
+
+    GtkTreeIter iter;
+    gtk_list_store_append(pdata->store, &iter);
+    gtk_list_store_set(pdata->store, &iter,
+        0, fields[0], // PID
+        1, fields[1], // Nombre
+        2, fields[2], // %CPU
+        3, fields[3], // %RAM
+        4, fields[4], // MemVirtual
+        5, fields[5], // Hilos
+        -1);
+} else {
+    g_print("⚠️ Línea malformada: %s\n", line);
+}
+g_strfreev(fields);
+
+        g_free(line);
+        return TRUE;
+    }
+
+    if (status == G_IO_STATUS_EOF) {
+        g_print("EOF alcanzado\n");
+        return FALSE;
+    }
+
+    return TRUE;
+}
+
+
+    // Detener el proceso y cerrar ventana
+    void stop_table_guardia_info(GtkButton *btn, gpointer user_data) {
+        TableProcessData *pdata = (TableProcessData *)user_data;
+        if (!pdata) return; // Already freed
+
+        if (pdata->child_pid > 0) {
+            kill(pdata->child_pid, SIGTERM);
+            pdata->child_pid = 0;
+        }
+        if (pdata->window) {
+            gtk_widget_destroy(pdata->window);
+            pdata->window = NULL;
+        }
+        if (pdata->io_channel) {
+            g_io_channel_unref(pdata->io_channel);
+            pdata->io_channel = NULL;
+        }
+        // Marca el puntero como NULL para evitar doble free
+        user_data = NULL;
+        g_free(pdata);
+    }
+void on_alertas_clicked(GtkButton *btn, gpointer user_data) {
+    GtkWidget *alert_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(alert_window), "Alertas de Procesos");
+    gtk_window_set_default_size(GTK_WINDOW(alert_window), 900, 500);
+
+    GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css,
+        "window, treeview, .view { background: #232629; color: #e0e0e0; }"
+        "treeview row { background: #232629; color: #e0e0e0; }"
+        "treeview row:selected { background: #44475a; }", -1, NULL);
+    GtkStyleContext *context = gtk_widget_get_style_context(alert_window);
+    gtk_style_context_add_provider(context, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_add(GTK_CONTAINER(alert_window), vbox);
+
+    // Modelo de la tabla (PID, Tipo, Valor)
+    GtkListStore *store = gtk_list_store_new(3,
+        G_TYPE_STRING, // PID
+        G_TYPE_STRING, // Tipo de alerta
+        G_TYPE_STRING  // Valor
+    );
+
+    GtkWidget *tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
+
+    GtkCellRenderer *renderer = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "PID", renderer, "text", 0, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Tipo", renderer, "text", 1, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Valor", renderer, "text", 2, NULL);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(scroll), tree);
+    gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 5);
+
+    GtkWidget *stop_button = gtk_button_new_with_label("Detener");
+    gtk_box_pack_start(GTK_BOX(vbox), stop_button, FALSE, FALSE, 5);
+
+    gtk_widget_show_all(alert_window);
+
+    // Lanzar guardia_info y leer solo alertas
+    gchar *argv[] = {"../Guardia del tesoro real/test", NULL};
+    GPid child_pid;
+    gint out_fd;
+    GError *error = NULL;
+
+    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &child_pid, NULL, &out_fd, NULL, &error)) {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(alert_window), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        return;
+    }
+
+    GIOChannel *io_channel = g_io_channel_unix_new(out_fd);
+
+    TableProcessData *pdata = g_new0(TableProcessData, 1);
+    pdata->child_pid = child_pid;
+    pdata->io_channel = io_channel;
+    pdata->window = alert_window;
+    pdata->store = store;
+
+    g_io_add_watch(io_channel, G_IO_IN | G_IO_HUP, read_guardia_alertas_table, pdata);
+    g_signal_connect(stop_button, "clicked", G_CALLBACK(stop_table_guardia_info), pdata);
+}
+
+void on_all_processes_clicked(GtkButton *btn, gpointer user_data) {
+    // Ventana para mostrar procesos
+    GtkWidget *proc_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(proc_window), "Procesos en tiempo real");
+    gtk_window_set_default_size(GTK_WINDOW(proc_window), 900, 500);
+
+   GtkCssProvider *css = gtk_css_provider_new();
+    gtk_css_provider_load_from_data(css,
+        "window, treeview, .view { background: #232629; color: #e0e0e0; }"
+        "treeview row { background: #232629; color: #e0e0e0; }"
+        "treeview row:selected { background: #44475a; }", -1, NULL);
+    GtkStyleContext *context = gtk_widget_get_style_context(proc_window);
+    gtk_style_context_add_provider(context, GTK_STYLE_PROVIDER(css), GTK_STYLE_PROVIDER_PRIORITY_USER);
+
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 5);
+    gtk_container_add(GTK_CONTAINER(proc_window), vbox);
+
+    // Modelo de la tabla
+    GtkListStore *store = gtk_list_store_new(6,
+        G_TYPE_STRING, // PID
+        G_TYPE_STRING, // Nombre
+        G_TYPE_STRING, // %CPU
+        G_TYPE_STRING, // %RAM
+        G_TYPE_STRING, // Memoria Virtual
+        G_TYPE_STRING  // Hilos
+    );
+
+    // TreeView
+    GtkWidget *tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
+    gtk_tree_view_set_headers_visible(GTK_TREE_VIEW(tree), TRUE);
+
+    // Columnas
+    GtkCellRenderer *renderer;
+    renderer = gtk_cell_renderer_text_new();
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "PID", renderer, "text", 0, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Nombre", renderer, "text", 1, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "% CPU", renderer, "text", 2, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "% RAM", renderer, "text", 3, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Memoria Virtual (KB)", renderer, "text", 4, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Hilos", renderer, "text", 5, NULL);
+
+    GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
+    gtk_container_add(GTK_CONTAINER(scroll), tree);
+    gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 5);
+
+    GtkWidget *stop_button = gtk_button_new_with_label("Detener");
+    gtk_box_pack_start(GTK_BOX(vbox), stop_button, FALSE, FALSE, 5);
+
+    gtk_widget_show_all(proc_window);
+
+    // Lanzar guardia_info y leer su salida
+    gchar *argv[] = {"../Guardia del tesoro real/test", NULL};
+    GPid child_pid;
+    gint out_fd;
+    GError *error = NULL;
+
+    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &child_pid, NULL, &out_fd, NULL, &error)) {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(proc_window), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        return;
+    }
+
+    GIOChannel *io_channel = g_io_channel_unix_new(out_fd);
+
+    TableProcessData *pdata = g_new0(TableProcessData, 1);
+    pdata->child_pid = child_pid;
+    pdata->io_channel = io_channel;
+    pdata->window = proc_window;
+    pdata->store = store;
+
+    g_io_add_watch(io_channel, G_IO_IN | G_IO_HUP, read_guardia_info_table, pdata);
+    g_signal_connect(stop_button, "clicked", G_CALLBACK(stop_table_guardia_info), pdata);
+}
+
 void on_monitoring_clicked(GtkButton *btn, gpointer user_data)
 {
-    //Kelen   
+    const gchar *cpu_text = gtk_entry_get_text(GTK_ENTRY(entry_cpu_threshold));
+    const gchar *mem_text = gtk_entry_get_text(GTK_ENTRY(entry_mem_threshold));
+
+    if (cpu_text[0] == '\0' || mem_text[0] == '\0') {
+        GtkWidget *dialog = gtk_message_dialog_new(NULL, GTK_DIALOG_MODAL, GTK_MESSAGE_WARNING, GTK_BUTTONS_OK,
+            "Debe especificar ambos umbrales de CPU y Memoria.");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        return;
+    }
+
+    // Crear nueva ventana
+    GtkWidget *monitor_window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(monitor_window), "Monitoreo de Procesos");
+    gtk_window_set_default_size(GTK_WINDOW(monitor_window), 400, 200);
+
+    // Crear caja vertical
+    GtkWidget *vbox = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+    gtk_container_add(GTK_CONTAINER(monitor_window), vbox);
+
+    // Botón de Alertas
+    GtkWidget *alert_button = gtk_button_new_with_label("Alertas");
+    gtk_box_pack_start(GTK_BOX(vbox), alert_button, TRUE, TRUE, 10);
+
+    // Botón de Todos los procesos
+    GtkWidget *all_processes_button = gtk_button_new_with_label("Todos los procesos");
+    gtk_box_pack_start(GTK_BOX(vbox), all_processes_button, TRUE, TRUE, 10);
+
+    g_signal_connect(all_processes_button, "clicked", G_CALLBACK(on_all_processes_clicked), NULL);
+    g_signal_connect(alert_button, "clicked", G_CALLBACK(on_alertas_clicked), NULL);
+    gtk_widget_show_all(monitor_window);
+
+
 }
 
 void on_scan_clicked(GtkButton *btn, gpointer user_data)
@@ -67,9 +378,6 @@ void on_scan_port_clicked(GtkButton *btn, gpointer user_data) {
     pclose(fp);
 }
 
-
-
-
 void do_all(GtkButton *btn, gpointer user_data)
 {
     on_scan_clicked(btn,user_data);
@@ -112,22 +420,51 @@ int main(int argc, char *argv[]) {
     g_signal_connect(button3, "clicked", G_CALLBACK(on_scan_port_clicked), NULL);
     gtk_box_pack_start(GTK_BOX(vbox), button3, FALSE, FALSE, 5);
 
-    // Label y Entry for starting port
-    GtkWidget *hbox_ports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    //Create grid for ports and thresholds
+    GtkWidget *grid = gtk_grid_new();
+    gtk_grid_set_row_spacing(GTK_GRID(grid), 5);
+    gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
+
+    // Label and Entry for starting port
+    // GtkWidget *hbox_ports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *label_start = gtk_label_new("Puerto inicial:");
     entry_start_port = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_start_port), "e.g. 1");
-    gtk_box_pack_start(GTK_BOX(hbox_ports), label_start, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox_ports), entry_start_port, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(hbox_ports), label_start, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(hbox_ports), entry_start_port, FALSE, FALSE, 0);
+    gtk_grid_attach(GTK_GRID(grid), label_start, 0, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_start_port, 1, 0, 1, 1);
 
-    // Label y Entry for ending port
+    // Label and Entry for cpu usage threshold
+    GtkWidget *label_cou = gtk_label_new("Umbral de CPU (%):");
+    entry_cpu_threshold = gtk_entry_new();
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_cpu_threshold), "e.g. 80");
+    // gtk_box_pack_start(GTK_BOX(hbox_cou), label_cou, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(hbox_cou), entry_cpu_threshold, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(vbox), hbox_cou, FALSE, FALSE, 5);
+    gtk_grid_attach(GTK_GRID(grid), label_cou, 2, 0, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_cpu_threshold, 3, 0, 1, 1);
+
+    // Label and Entry for ending port
     GtkWidget *label_end = gtk_label_new("Puerto final:");
     entry_end_port = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_end_port), "e.g. 1024");
-    gtk_box_pack_start(GTK_BOX(hbox_ports), label_end, FALSE, FALSE, 0);
-    gtk_box_pack_start(GTK_BOX(hbox_ports), entry_end_port, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(hbox_ports), label_end, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(hbox_ports), entry_end_port, FALSE, FALSE, 0);
+    // gtk_box_pack_start(GTK_BOX(vbox), hbox_ports, FALSE, FALSE, 5);
+    gtk_grid_attach(GTK_GRID(grid), label_end, 0, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_end_port, 1, 1, 1, 1);
 
-    gtk_box_pack_start(GTK_BOX(vbox), hbox_ports, FALSE, FALSE, 5);
+    // Label and Entry for memory usage threshold
+    // GtkWidget *hbox_mem = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
+    GtkWidget *label_mem = gtk_label_new("Umbral de Memoria (%):");
+    entry_mem_threshold = gtk_entry_new();  
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_mem_threshold), "e.g. 90");
+    gtk_grid_attach(GTK_GRID(grid), label_mem, 2, 1, 1, 1);
+    gtk_grid_attach(GTK_GRID(grid), entry_mem_threshold, 3, 1, 1, 1);
+
+    //Add grid to vertical box
+    gtk_box_pack_start(GTK_BOX(vbox), grid, FALSE, FALSE, 5);
 
     //Button to do all
     button4 = gtk_button_new_with_label("Iniciar todo");

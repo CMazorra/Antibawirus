@@ -180,20 +180,20 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
 
   if(cpu > UmbralCPU && !lista_blanca(name))
   {
-  printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
+//   printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
   }
 
   if(rss > UmbralMem && !lista_blanca(name))
  {
-  printf("\n🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
+//   printf("\n🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
  }
  
  long clk_ticks = sysconf(_SC_CLK_TCK);
  float delta_proc_sec = (float)delta_proc / clk_ticks;
 
- printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8.2f s | RAM: %6ld KB (%.2f%%) | %6lu KB (Virtual) | Hilo: %d\n",
-         pid, name, cpu, delta_proc_sec, rss, ram_percent, vsize, threads);
- 
+//  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | RAM: %6ld KB (%.2f%%) | %6lu KB (Virtual) | Hilo: %d\n",
+//          pid, name, cpu, rss, ram_percent, vsize, threads);
+ printf("%s;%s;%.2f;%.2f;%lu;%d\n", pid, name, cpu, ram_percent, vsize, threads);
 //  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
 //          pid, name, cpu, delta_proc ,rss, vsize, threads);
 }
@@ -215,8 +215,8 @@ int main()
 
    init_tracker(&tracker);
 
-   printf("🛡️ Guardias del Tesoro Real - Monitoreo activado\n");
-   printf("-------------------------------------------\n");
+   // printf("🛡️ Guardias del Tesoro Real - Monitoreo activado\n");
+   // printf("-------------------------------------------\n");
 
 
    while(1)
@@ -225,7 +225,7 @@ int main()
     {
       cleanup(&tracker);
       last_cleanup = time(NULL);
-      printf("\n--- Limpieza realizada. Procesos activos: %d ---\n", tracker.count);
+      // printf("\n--- Limpieza realizada. Procesos activos: %d ---\n", tracker.count);
     }
     
     dir= opendir("/proc");
