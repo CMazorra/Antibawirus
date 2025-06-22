@@ -383,7 +383,7 @@ void on_scan_clicked(GtkButton *btn, gpointer user_data)
 gboolean realizar_escaneo_usb(gpointer data) {
     usb_scan_output = g_string_new("");
 
-    const char *usb_scanner_path = "../Patrullas Fronterizas/fronteras";
+    const char *usb_scanner_path = "../Patrullas Fronterizas/test1";
     FILE *fp = popen(usb_scanner_path, "r");
 
     if (!fp) {
@@ -549,7 +549,7 @@ int main(int argc, char *argv[])
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 5);
 
     gtk_widget_show_all(window);
-    
+
     g_idle_add(realizar_escaneo_usb, NULL);
 
     gtk_widget_hide(scroll);
