@@ -549,9 +549,7 @@ int main(int argc, char *argv[])
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 5);
 
     gtk_widget_show_all(window);
-
-    // Inicializa la cadena
-    usb_scan_output = g_string_new("");
+    
     g_idle_add(realizar_escaneo_usb, NULL);
 
     gtk_widget_hide(scroll);
