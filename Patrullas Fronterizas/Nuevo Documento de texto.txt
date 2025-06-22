@@ -1,38 +1,44 @@
 #!/bin/bash
 
-DIR="/media/adrianux/ADRI"
-USER=$(whoami)
+echo "🔍 Verificando e instalando dependencias necesarias..."
+sudo apt-get update
 
-echo "Verificando si $DIR está montado..."
+# Reinstala libstdc++6 por si faltan rutas
+sudo apt-get install --reinstall -y libstdc++6
 
-MOUNT_INFO=$(mount | grep "$DIR")
+# Asegura que GTK esté instalado
+sudo apt-get install -y libgtk-3-dev
 
-if [ -z "$MOUNT_INFO" ]; then
-  echo "La ruta $DIR no está montada."
-  exit 1
-fi
+# Asegura que GLib esté completo por si falla GIO
+sudo apt-get install -y libglib2.0-dev
 
-echo "Información de montaje:"
-echo "$MOUNT_INFO"
-
-if echo "$MOUNT_INFO" | grep -q "ro,"; then
-  echo "La unidad está montada como solo lectura. Intentando remontar como lectura-escritura..."
-  sudo mount -o remount,rw "$DIR"
-  if [ $? -ne 0 ]; then
-    echo "No se pudo remontar $DIR como lectura-escritura. Verifica permisos y estado del disco."
-    exit 1
-  fi
-  echo "Unidad remontada en modo lectura-escritura."
+# Muestra si el archivo gtk.h existe
+if [ -f /usr/include/gtk-3.0/gtk/gtk.h ]; then
+    echo "✅ gtk/gtk.h está presente."
 else
-  echo "La unidad ya está montada en modo lectura-escritura."
+    echo "❌ gtk/gtk.h NO se encuentra. Algo falló en la instalación."
 fi
 
-echo "Cambiando dueño de $DIR a $USER..."
-sudo chown "$USER":"$USER" "$DIR"
+# Crea una carpeta de prueba y compila un ejemplo
+echo "🛠️ Compilando un programa de ejemplo..."
+mkdir -p ~/gtk_prueba
+cat << 'EOF' > ~/gtk_prueba/hola_gtk.c
+#include <gtk/gtk.h>
 
-echo "Dando permisos de escritura al usuario..."
-sudo chmod u+w "$DIR"
+int main(int argc, char *argv[]) {
+    gtk_init(&argc, &argv);
+    GtkWidget *ventana = gtk_window_new(GTK_WINDOW_TOPLEVEL);
+    gtk_window_set_title(GTK_WINDOW(ventana), "Hola GTK");
+    g_signal_connect(ventana, "destroy", G_CALLBACK(gtk_main_quit), NULL);
+    gtk_widget_show_all(ventana);
+    gtk_main();
+    return 0;
+}
+EOF
 
-echo "¡Listo! Ahora deberías poder escribir en $DIR."
+cd ~/gtk_prueba
+gcc hola_gtk.c -o hola_gtk `pkg-config --cflags --libs gtk+-3.0`
+
+echo "✅ Listo. Ejecuta el programa con: ./hola_gtk"
 
 
