@@ -17,6 +17,7 @@ GtkWidget *entry_start_port;
 GtkWidget *entry_end_port;
 GtkWidget *entry_cpu_threshold;
 GtkWidget *entry_mem_threshold;
+GString *usb_scan_output;
 
 
 void on_hide_text(GtkButton *btn, gpointer user_data) {
@@ -337,9 +338,16 @@ void on_monitoring_clicked(GtkButton *btn, gpointer user_data)
 
 }
 
-void on_scan_clicked(GtkButton *btn, gpointer user_data)
-{
-    //Adriana
+void on_scan_clicked(GtkButton *btn, gpointer user_data) {
+    gtk_widget_show(scroll);
+    gtk_widget_show(exit_button);
+
+    if (usb_scan_output && usb_scan_output->len > 0) {
+        gtk_text_buffer_set_text(buffer, usb_scan_output->str, -1);
+    } 
+    else {
+        gtk_text_buffer_set_text(buffer, "No hay resultados del escaneo USB.\n", -1);
+    }
 }
 
 void on_scan_port_clicked(GtkButton *btn, gpointer user_data) {
@@ -355,7 +363,7 @@ void on_scan_port_clicked(GtkButton *btn, gpointer user_data) {
     g_snprintf(range_arg, sizeof(range_arg), "%s-%s", start_text, end_text);
 
     gchar cmd[256];
-    g_snprintf(cmd, sizeof(cmd),"../Defensores de la muralla/scanner %s", range_arg);
+    g_snprintf(cmd, sizeof(cmd),"\"../Defensores de las Murallas/scanner\" %s", range_arg);
 
     gtk_widget_show(scroll);
     gtk_widget_show(exit_button);
@@ -486,9 +494,31 @@ int main(int argc, char *argv[]) {
     gtk_box_pack_start(GTK_BOX(vbox), scroll, TRUE, TRUE, 5);
 
     gtk_widget_show_all(window);
+    
+    // Inicializa la cadena
+    usb_scan_output = g_string_new("");
+
+    // Ruta al escáner USB
+    const char *usb_scanner_path = "\"../Patrullas Fronterizas/fronteras\"";
+
+    FILE *fp = popen(usb_scanner_path, "r");
+    if (!fp) {
+        g_string_append(usb_scan_output, "Error al ejecutar el escaneo de dispositivos USB.\n");
+    } else {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            g_string_append(usb_scan_output, line);
+        }
+        pclose(fp);
+    }
+
     gtk_widget_hide(scroll);
     gtk_widget_hide(exit_button);
     gtk_main();
+
+    if (usb_scan_output) {
+        g_string_free(usb_scan_output, TRUE);
+    }
 
     return 0;
 }
