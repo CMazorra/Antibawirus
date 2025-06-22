@@ -383,7 +383,7 @@ void on_scan_clicked(GtkButton *btn, gpointer user_data)
 gboolean realizar_escaneo_usb(gpointer data) {
     usb_scan_output = g_string_new("");
 
-    const char *usb_scanner_path = "\"../Patrullas Fronterizas/Test1\";
+    const char *usb_scanner_path = "\"../Patrullas Fronterizas/Test1\"";
     FILE *fp = popen(usb_scanner_path, "r");
 
     if (!fp) {
