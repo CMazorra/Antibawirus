@@ -380,6 +380,26 @@ void on_scan_clicked(GtkButton *btn, gpointer user_data)
     }
 }
 
+gboolean realizar_escaneo_usb(gpointer data) {
+    usb_scan_output = g_string_new("");
+
+    const char *usb_scanner_path = "../Patrullas Fronterizas/fronteras";
+    FILE *fp = popen(usb_scanner_path, "r");
+
+    if (!fp) {
+        g_string_append(usb_scan_output, "Error al ejecutar el escaneo de dispositivos USB.\n");
+    } else {
+        char line[512];
+        while (fgets(line, sizeof(line), fp)) {
+            g_string_append(usb_scan_output, line);
+        }
+        pclose(fp);
+    }
+
+    return FALSE;  // Se ejecuta solo una vez
+}
+
+
 void on_scan_port_clicked(GtkButton *btn, gpointer user_data)
 {
     const gchar *start_text = gtk_entry_get_text(GTK_ENTRY(entry_start_port));
@@ -532,24 +552,7 @@ int main(int argc, char *argv[])
 
     // Inicializa la cadena
     usb_scan_output = g_string_new("");
-
-    // Ruta al escáner USB
-    const char *usb_scanner_path = "\"../Patrullas Fronterizas/Test1\"";
-
-    FILE *fp = popen(usb_scanner_path, "r");
-    if (!fp)
-    {
-        g_string_append(usb_scan_output, "Error al ejecutar el escaneo de dispositivos USB.\n");
-    }
-    else
-    {
-        char line[512];
-        while (fgets(line, sizeof(line), fp))
-        {
-            g_string_append(usb_scan_output, line);
-        }
-        pclose(fp);
-    }
+    g_idle_add(realizar_escaneo_usb, NULL);
 
     gtk_widget_hide(scroll);
     gtk_widget_hide(exit_button);
