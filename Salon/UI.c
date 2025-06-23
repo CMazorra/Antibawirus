@@ -63,54 +63,6 @@ gboolean read_guardia_info(GIOChannel *source, GIOCondition cond, gpointer data)
     return TRUE;
 }
 
-// gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpointer data)
-// {
-//     TableProcessData *pdata = (TableProcessData *)data;
-//     gchar *line = NULL;
-//     gsize len = 0;
-//     GError *error = NULL;
-
-//     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
-//     if (status == G_IO_STATUS_NORMAL && line)
-//     {
-//         // Solo procesar líneas de alerta
-//         if (g_str_has_prefix(line, "ALERTA_USO_CPU") || g_str_has_prefix(line, "ALERTA_USO_Memoria"))
-//         {
-//             // Espera formato: ALERTA_USO_CPU: %.2f%% (PID: %s) o ALERTA_USO_Memoria: %6ld KB (PID: %s)
-//             gchar tipo[32], nombre[128], pid[32], valor[32];
-//             // if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2)
-//             if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% | Nombre: %127[^|]| PID: %31s", valor, nombre, pid) == 3)
-//             {
-//                 // Puedes obtener el nombre del proceso si lo incluyes en el printf de guardia_info
-//                 GtkTreeIter iter;
-//                 gtk_list_store_append(pdata->store, &iter);
-//                 gtk_list_store_set(pdata->store, &iter,
-//                                    0, pid,   // PID
-//                                    1, "CPU", // Tipo de alerta
-//                                    2, valor,
-//                                    3, nombre // Valor de CPU
-//                                    -1);
-//             }
-//             else if (sscanf(line, "ALERTA_USO_Memoria: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2)
-//             {
-//                 GtkTreeIter iter;
-//                 gtk_list_store_append(pdata->store, &iter);
-//                 gtk_list_store_set(pdata->store, &iter,
-//                                    0, pid,       // PID
-//                                    1, "Memoria", // Tipo de alerta
-//                                    2, valor,     // Valor de Memoria
-//                                    -1);
-//             }
-//         }
-//         g_free(line);
-//         return TRUE;
-//     }
-//     if (status == G_IO_STATUS_EOF)
-//     {
-//         return FALSE;
-//     }
-//     return TRUE;
-// }
 gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpointer data)
 {
     TableProcessData *pdata = (TableProcessData *)data;
@@ -292,19 +244,39 @@ void on_alertas_clicked(GtkButton *btn, gpointer user_data)
 
     gtk_widget_show_all(alert_window);
 
+    const gchar *cpu_text = gtk_entry_get_text(GTK_ENTRY(entry_cpu_threshold));
+    const gchar *mem_text = gtk_entry_get_text(GTK_ENTRY(entry_mem_threshold));
+
+    if (strlen(cpu_text) == 0 || strlen(mem_text) == 0) 
+    {
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(alert_window), GTK_DIALOG_MODAL,
+        GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "Debe ingresar ambos umbrales (CPU y RAM).");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    return;
+    }
+
+    float cpu_umbral = atof(cpu_text);
+    float ram_umbral = atof(mem_text);
+
+    gchar *cpu_str = g_strdup_printf("%.2f", cpu_umbral);
+    gchar *ram_str = g_strdup_printf("%.2f", ram_umbral);
     // Lanzar guardia_info y leer solo alertas
-    gchar *argv[] = {"../Guardia del tesoro real/test", NULL};
+    gchar *argv[] = {"../Guardia del tesoro real/test", cpu_str, ram_str, NULL};
     GPid child_pid;
     gint out_fd;
     GError *error = NULL;
 
-    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &child_pid, NULL, &out_fd, NULL, &error))
-    {
-        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(alert_window), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
-        gtk_dialog_run(GTK_DIALOG(dialog));
-        gtk_widget_destroy(dialog);
-        return;
-    }
+    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &child_pid, NULL, &out_fd, NULL, &error)) {
+    GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(alert_window), GTK_DIALOG_MODAL,
+        GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
+    gtk_dialog_run(GTK_DIALOG(dialog));
+    gtk_widget_destroy(dialog);
+    g_error_free(error);
+    g_free(cpu_str);
+    g_free(ram_str);
+    return;
+}
 
     GIOChannel *io_channel = g_io_channel_unix_new(out_fd);
 
@@ -316,6 +288,9 @@ void on_alertas_clicked(GtkButton *btn, gpointer user_data)
 
     g_io_add_watch(io_channel, G_IO_IN | G_IO_HUP, read_guardia_alertas_table, pdata);
     g_signal_connect(stop_button, "clicked", G_CALLBACK(stop_table_guardia_info), pdata);
+
+    g_free(cpu_str);
+    g_free(ram_str);
 }
 
 void on_all_processes_clicked(GtkButton *btn, gpointer user_data)
@@ -370,17 +345,39 @@ void on_all_processes_clicked(GtkButton *btn, gpointer user_data)
 
     gtk_widget_show_all(proc_window);
 
-    // Lanzar guardia_info y leer su salida
-    gchar *argv[] = {"../Guardia del tesoro real/test", NULL};
+    const gchar *cpu_text = gtk_entry_get_text(GTK_ENTRY(entry_cpu_threshold));
+    const gchar *mem_text = gtk_entry_get_text(GTK_ENTRY(entry_mem_threshold));
+
+    if (strlen(cpu_text) == 0 || strlen(mem_text) == 0)
+    {
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(proc_window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_WARNING, GTK_BUTTONS_OK, "Debe ingresar ambos umbrales (CPU y RAM).");
+        gtk_dialog_run(GTK_DIALOG(dialog));
+        gtk_widget_destroy(dialog);
+        return;
+    }
+
+    float cpu_umbral = atof(cpu_text);
+    float ram_umbral = atof(mem_text);
+    gchar *cpu_str = g_strdup_printf("%.2f", cpu_umbral);
+    gchar *ram_str = g_strdup_printf("%.2f", ram_umbral);
+
+    // 👇 Lanzar el ejecutable con los argumentos
+    gchar *argv[] = {"../Guardia del tesoro real/test", cpu_str, ram_str, NULL};
     GPid child_pid;
     gint out_fd;
     GError *error = NULL;
 
-    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL, &child_pid, NULL, &out_fd, NULL, &error))
+    if (!g_spawn_async_with_pipes(NULL, argv, NULL, G_SPAWN_DO_NOT_REAP_CHILD, NULL, NULL,
+        &child_pid, NULL, &out_fd, NULL, &error))
     {
-        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(proc_window), GTK_DIALOG_MODAL, GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
+        GtkWidget *dialog = gtk_message_dialog_new(GTK_WINDOW(proc_window), GTK_DIALOG_MODAL,
+            GTK_MESSAGE_ERROR, GTK_BUTTONS_OK, "Error al ejecutar guardia_info.");
         gtk_dialog_run(GTK_DIALOG(dialog));
         gtk_widget_destroy(dialog);
+        g_error_free(error);
+        g_free(cpu_str);
+        g_free(ram_str);
         return;
     }
 
@@ -394,6 +391,10 @@ void on_all_processes_clicked(GtkButton *btn, gpointer user_data)
 
     g_io_add_watch(io_channel, G_IO_IN | G_IO_HUP, read_guardia_info_table, pdata);
     g_signal_connect(stop_button, "clicked", G_CALLBACK(stop_table_guardia_info), pdata);
+
+    // ✅ Liberar cadenas duplicadas
+    g_free(cpu_str);
+    g_free(ram_str);
 }
 
 void on_monitoring_clicked(GtkButton *btn, gpointer user_data)

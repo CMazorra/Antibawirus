@@ -9,8 +9,11 @@
 #include <pthread.h>
 #include "monitor.h"
 
-#define UmbralCPU 10.0
-#define UmbralMem 1.0
+// #define UmbralCPU 10.0
+// #define UmbralMem 1.0
+
+float UmbralCPU = 10.0;
+float UmbralMem = 1.0;
 
 pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -211,9 +214,14 @@ void* process_info_thread(void* arg)
    return NULL;
 }
 
-int main()
+int main(int argc, char* argv[])
 {
    setvbuf(stdout, NULL, _IONBF, 0);
+   if(argc >= 3 )
+   {
+    UmbralCPU = atof(argv[1]);
+    UmbralMem = atof(argv[2]);
+   }
    DIR* dir;
    struct dirent* entry;
    ProcessTracker tracker;
