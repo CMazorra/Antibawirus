@@ -179,7 +179,7 @@ void stop_table_guardia_info(GtkButton *btn, gpointer user_data)
 {
     TableProcessData *pdata = (TableProcessData *)user_data;
     if (!pdata)
-        return; // Already freed
+        return; 
 
     if (pdata->child_pid > 0)
     {
@@ -392,7 +392,6 @@ void on_all_processes_clicked(GtkButton *btn, gpointer user_data)
     g_io_add_watch(io_channel, G_IO_IN | G_IO_HUP, read_guardia_info_table, pdata);
     g_signal_connect(stop_button, "clicked", G_CALLBACK(stop_table_guardia_info), pdata);
 
-    // ✅ Liberar cadenas duplicadas
     g_free(cpu_str);
     g_free(ram_str);
 }
@@ -557,12 +556,9 @@ int main(int argc, char *argv[])
     gtk_grid_set_column_spacing(GTK_GRID(grid), 10);
 
     // Label and Entry for starting port
-    // GtkWidget *hbox_ports = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *label_start = gtk_label_new("Puerto inicial:");
     entry_start_port = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_start_port), "e.g. 1");
-    // gtk_box_pack_start(GTK_BOX(hbox_ports), label_start, FALSE, FALSE, 0);
-    // gtk_box_pack_start(GTK_BOX(hbox_ports), entry_start_port, FALSE, FALSE, 0);
     gtk_grid_attach(GTK_GRID(grid), label_start, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_start_port, 1, 0, 1, 1);
 
@@ -570,9 +566,6 @@ int main(int argc, char *argv[])
     GtkWidget *label_cou = gtk_label_new("Umbral de CPU (%):");
     entry_cpu_threshold = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_cpu_threshold), "e.g. 80");
-    // gtk_box_pack_start(GTK_BOX(hbox_cou), label_cou, FALSE, FALSE, 0);
-    // gtk_box_pack_start(GTK_BOX(hbox_cou), entry_cpu_threshold, FALSE, FALSE, 0);
-    // gtk_box_pack_start(GTK_BOX(vbox), hbox_cou, FALSE, FALSE, 5);
     gtk_grid_attach(GTK_GRID(grid), label_cou, 2, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_cpu_threshold, 3, 0, 1, 1);
 
@@ -580,9 +573,6 @@ int main(int argc, char *argv[])
     GtkWidget *label_end = gtk_label_new("Puerto final:");
     entry_end_port = gtk_entry_new();
     gtk_entry_set_placeholder_text(GTK_ENTRY(entry_end_port), "e.g. 1024");
-    // gtk_box_pack_start(GTK_BOX(hbox_ports), label_end, FALSE, FALSE, 0);
-    // gtk_box_pack_start(GTK_BOX(hbox_ports), entry_end_port, FALSE, FALSE, 0);
-    // gtk_box_pack_start(GTK_BOX(vbox), hbox_ports, FALSE, FALSE, 5);
     gtk_grid_attach(GTK_GRID(grid), label_end, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_end_port, 1, 1, 1, 1);
 

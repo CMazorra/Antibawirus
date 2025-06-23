@@ -9,9 +9,6 @@
 #include <pthread.h>
 #include "monitor.h"
 
-// #define UmbralCPU 10.0
-// #define UmbralMem 1.0
-
 float UmbralCPU = 10.0;
 float UmbralMem = 1.0;
 
@@ -57,16 +54,10 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
 
          if(cpu_us - tracker->processes[i].prev_cpu > UmbralCPU && !lista_blanca(name))
          {
-            //printf("ALERTA_USO_CPU ⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us-tracker->processes[i].prev_cpu);
             printf("ALERTA_PICO_CPU: %.2f%% | Nombre: %s | PID: %s\n", cpu_us - tracker->processes[i].prev_cpu, name, pid);
          }
-         // if(mem_us - tracker->processes[i].prev_memory > UmbralMem / 2 && !lista_blanca(name))
-         // {
-         //    printf("ALERTA_USO_MEM ⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us- tracker->processes[i].prev_memory); 
-         // }
          if(ram_percent - tracker->processes[i].prev_ram_percent > 10.0 && !lista_blanca)
          {
-            //printf(" ALERTA_USO_ MEM⚠️ [RAM%%] %s (PID: %s) +%.2f%%\n", name, pid, ram_percent - tracker->processes[i].prev_ram_percent);
             printf("ALERTA_PICO_RAM: %.2f%% | Nombre: %s | PID: %s\n", ram_percent - tracker->processes[i].prev_ram_percent, name, pid);
          }
 
@@ -147,7 +138,7 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
     fgets(line, sizeof(line), file);
     fclose(file);
 
-    // Saltar hasta el campo 14 (utime) y 15 (stime)
+    //utime and stime
     char *ptr = line;
     int i;
     for (i = 0; i < 13; i++) {
@@ -155,16 +146,6 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
     }
     sscanf(ptr, "%ld %ld", &utime, &stime);
 
-
-//  //Memory
-//  snprintf(path, sizeof(path), "/proc/%s/statm", pid);
-//     file = fopen(path, "r");
-//     if (file) {
-//         fscanf(file, "%*s %ld", &rss);
-//         fclose(file);
-//         rss *= sysconf(_SC_PAGESIZE) / 1024; 
-//     }
- //virtual memory
  snprintf(path, sizeof(path), "/proc/%s/statm",pid);
  file = fopen(path, "r");
  if(file)
@@ -185,25 +166,19 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
 
   if(cpu > UmbralCPU && !lista_blanca(name))
   {
-   //printf("\n ALERTA_USO_CPU 🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
    printf("ALERTA_USO_CPU: %.2f%% | Nombre: %s | PID: %s\n", cpu, name, pid);
   }
 
   if(ram_percent> UmbralMem && !lista_blanca(name))
  {
-//   printf("\n ALERTA_USO_MEM 🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
-     //printf("ALERTA_USO_Memoria: %.2f%% (PID: %s)\n", ram_percent, pid);
      printf("ALERTA_USO_RAM: %.2f%% | Nombre: %s | PID: %s\n", ram_percent, name, pid);
  }
  
  long clk_ticks = sysconf(_SC_CLK_TCK);
  float delta_proc_sec = (float)delta_proc / clk_ticks;
 
-//  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | RAM: %6ld KB (%.2f%%) | %6lu KB (Virtual) | Hilo: %d\n",
-//          pid, name, cpu, rss, ram_percent, vsize, threads);
  printf("%s;%s;%.2f;%.2f;%lu;%d\n", pid, name, cpu, ram_percent, vsize, threads);
-//  printf("PID: %-6s | Nombre: %-20s | CPU: %6.2f%% | Tiempo en CPU: %8ld ms | Memoria: %6ld KB (RSS) | %6lu KB (Virtual) | Hilo: %d\n",
-//          pid, name, cpu, delta_proc ,rss, vsize, threads);
+
 }
 
 void* process_info_thread(void* arg)
@@ -228,10 +203,6 @@ int main(int argc, char* argv[])
    time_t last_cleanup = time(NULL);
 
    init_tracker(&tracker);
-
-   // printf("🛡️ Guardias del Tesoro Real - Monitoreo activado\n");
-   // printf("-------------------------------------------\n");
-
 
    while(1)
    {
