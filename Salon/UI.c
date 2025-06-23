@@ -18,6 +18,7 @@ GtkWidget *entry_end_port;
 GtkWidget *entry_cpu_threshold;
 GtkWidget *entry_mem_threshold;
 GString *usb_scan_output;
+GMutex    usb_mutex;
 
 void on_hide_text(GtkButton *btn, gpointer user_data)
 {
@@ -432,40 +433,41 @@ void on_monitoring_clicked(GtkButton *btn, gpointer user_data)
     gtk_widget_show_all(monitor_window);
 }
 
-void on_scan_clicked(GtkButton *btn, gpointer user_data)
-{
+gpointer usb_scan_thread(gpointer _unused) {
+    const char *cmd = "stdbuf -oL -eL '../Patrullas Fronterizas/fronteras' 2>&1";
+    FILE *fp = popen(cmd, "r");
+    if (!fp) {
+        g_mutex_lock(&usb_mutex);
+        g_string_append(usb_scan_output,
+            "Error al ejecutar escaneo USB.\n");
+        g_mutex_unlock(&usb_mutex);
+        return NULL;
+    }
+
+    char line[512];
+    while (fgets(line, sizeof(line), fp)) {
+        g_mutex_lock(&usb_mutex);
+        g_string_append(usb_scan_output, line);
+        g_mutex_unlock(&usb_mutex);
+    }
+    pclose(fp);
+    return NULL;
+}
+
+void on_scan_clicked(GtkButton *btn, gpointer user_data) {
+    gchar *snapshot;
+
+    // Toma snapshot protegido por mutex
+    g_mutex_lock(&usb_mutex);
+    snapshot = g_string_free(g_string_new(usb_scan_output->str), FALSE);
+    g_mutex_unlock(&usb_mutex);
+
     gtk_widget_show(scroll);
     gtk_widget_show(exit_button);
+    gtk_text_buffer_set_text(buffer, snapshot, -1);
 
-    if (usb_scan_output && usb_scan_output->len > 0)
-    {
-        gtk_text_buffer_set_text(buffer, usb_scan_output->str, -1);
-    }
-    else
-    {
-        gtk_text_buffer_set_text(buffer, "No hay resultados del escaneo USB.\n", -1);
-    }
+    g_free(snapshot);
 }
-
-gboolean realizar_escaneo_usb(gpointer data) {
-    usb_scan_output = g_string_new("");
-
-    const char *usb_scanner_path = "\"../Patrullas Fronterizas/fronteras\"";
-    FILE *fp = popen(usb_scanner_path, "r");
-
-    if (!fp) {
-        g_string_append(usb_scan_output, "Error al ejecutar el escaneo de dispositivos USB.\n");
-    } else {
-        char line[512];
-        while (fgets(line, sizeof(line), fp)) {
-            g_string_append(usb_scan_output, line);
-        }
-        pclose(fp);
-    }
-
-    return FALSE;  // Se ejecuta solo una vez
-}
-
 
 void on_scan_port_clicked(GtkButton *btn, gpointer user_data)
 {
@@ -608,7 +610,11 @@ int main(int argc, char *argv[])
 
     gtk_widget_show_all(window);
 
-    g_idle_add(realizar_escaneo_usb, NULL);
+    usb_scan_output = g_string_new(NULL);
+    g_mutex_init(&usb_mutex);
+
+    // Lanza el hilo
+    g_thread_new("usb-scan", usb_scan_thread, NULL);
 
     gtk_widget_hide(scroll);
     gtk_widget_hide(exit_button);
