@@ -10,7 +10,7 @@
 #include "monitor.h"
 
 #define UmbralCPU 10.0
-#define UmbralMem 100000
+#define UmbralMem 1.0
 
 pthread_mutex_t tracker_mutex = PTHREAD_MUTEX_INITIALIZER;
 
@@ -54,15 +54,17 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
 
          if(cpu_us - tracker->processes[i].prev_cpu > UmbralCPU && !lista_blanca(name))
          {
-            printf("⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us-tracker->processes[i].prev_cpu);
+            //printf("ALERTA_USO_CPU ⚠️ [CPU] %s (PID: %s) +%.2f%%\n", name, pid, cpu_us-tracker->processes[i].prev_cpu);
+            printf("ALERTA_PICO_CPU: %.2f%% | Nombre: %s | PID: %s\n", cpu_us - tracker->processes[i].prev_cpu, name, pid);
          }
-         if(mem_us - tracker->processes[i].prev_memory > UmbralMem / 2 && !lista_blanca(name))
-         {
-            printf("⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us- tracker->processes[i].prev_memory); 
-         }
+         // if(mem_us - tracker->processes[i].prev_memory > UmbralMem / 2 && !lista_blanca(name))
+         // {
+         //    printf("ALERTA_USO_MEM ⚠️ [RAM] %s (PID: %s) +%ld KB\n", name, pid, mem_us- tracker->processes[i].prev_memory); 
+         // }
          if(ram_percent - tracker->processes[i].prev_ram_percent > 10.0 && !lista_blanca)
          {
-            printf("⚠️ [RAM%%] %s (PID: %s) +%.2f%%\n", name, pid, ram_percent - tracker->processes[i].prev_ram_percent);
+            //printf(" ALERTA_USO_ MEM⚠️ [RAM%%] %s (PID: %s) +%.2f%%\n", name, pid, ram_percent - tracker->processes[i].prev_ram_percent);
+            printf("ALERTA_PICO_RAM: %.2f%% | Nombre: %s | PID: %s\n", ram_percent - tracker->processes[i].prev_ram_percent, name, pid);
          }
 
          tracker->processes[i].prev_cpu = cpu_us;
@@ -180,12 +182,15 @@ snprintf(path, sizeof(path), "/proc/%s/stat", pid);
 
   if(cpu > UmbralCPU && !lista_blanca(name))
   {
-//   printf("\n🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
+   //printf("\n ALERTA_USO_CPU 🚨 CPU: %.2f%% (PID: %s)\n", cpu, pid);
+   printf("ALERTA_USO_CPU: %.2f%% | Nombre: %s | PID: %s\n", cpu, name, pid);
   }
 
-  if(rss > UmbralMem && !lista_blanca(name))
+  if(ram_percent> UmbralMem && !lista_blanca(name))
  {
-//   printf("\n🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
+//   printf("\n ALERTA_USO_MEM 🚨 Memoria: %6ld KB (PID: %s)\n", rss, pid);
+     //printf("ALERTA_USO_Memoria: %.2f%% (PID: %s)\n", ram_percent, pid);
+     printf("ALERTA_USO_RAM: %.2f%% | Nombre: %s | PID: %s\n", ram_percent, name, pid);
  }
  
  long clk_ticks = sysconf(_SC_CLK_TCK);
@@ -208,6 +213,7 @@ void* process_info_thread(void* arg)
 
 int main()
 {
+   setvbuf(stdout, NULL, _IONBF, 0);
    DIR* dir;
    struct dirent* entry;
    ProcessTracker tracker;

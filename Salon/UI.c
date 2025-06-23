@@ -63,6 +63,54 @@ gboolean read_guardia_info(GIOChannel *source, GIOCondition cond, gpointer data)
     return TRUE;
 }
 
+// gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpointer data)
+// {
+//     TableProcessData *pdata = (TableProcessData *)data;
+//     gchar *line = NULL;
+//     gsize len = 0;
+//     GError *error = NULL;
+
+//     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
+//     if (status == G_IO_STATUS_NORMAL && line)
+//     {
+//         // Solo procesar líneas de alerta
+//         if (g_str_has_prefix(line, "ALERTA_USO_CPU") || g_str_has_prefix(line, "ALERTA_USO_Memoria"))
+//         {
+//             // Espera formato: ALERTA_USO_CPU: %.2f%% (PID: %s) o ALERTA_USO_Memoria: %6ld KB (PID: %s)
+//             gchar tipo[32], nombre[128], pid[32], valor[32];
+//             // if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2)
+//             if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% | Nombre: %127[^|]| PID: %31s", valor, nombre, pid) == 3)
+//             {
+//                 // Puedes obtener el nombre del proceso si lo incluyes en el printf de guardia_info
+//                 GtkTreeIter iter;
+//                 gtk_list_store_append(pdata->store, &iter);
+//                 gtk_list_store_set(pdata->store, &iter,
+//                                    0, pid,   // PID
+//                                    1, "CPU", // Tipo de alerta
+//                                    2, valor,
+//                                    3, nombre // Valor de CPU
+//                                    -1);
+//             }
+//             else if (sscanf(line, "ALERTA_USO_Memoria: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2)
+//             {
+//                 GtkTreeIter iter;
+//                 gtk_list_store_append(pdata->store, &iter);
+//                 gtk_list_store_set(pdata->store, &iter,
+//                                    0, pid,       // PID
+//                                    1, "Memoria", // Tipo de alerta
+//                                    2, valor,     // Valor de Memoria
+//                                    -1);
+//             }
+//         }
+//         g_free(line);
+//         return TRUE;
+//     }
+//     if (status == G_IO_STATUS_EOF)
+//     {
+//         return FALSE;
+//     }
+//     return TRUE;
+// }
 gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpointer data)
 {
     TableProcessData *pdata = (TableProcessData *)data;
@@ -73,42 +121,55 @@ gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpoin
     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
     if (status == G_IO_STATUS_NORMAL && line)
     {
-        // Solo procesar líneas de alerta
-        if (g_str_has_prefix(line, "ALERTA_USO_CPU") || g_str_has_prefix(line, "ALERTA_USO_Memoria"))
+        if(!g_str_has_prefix(line, "ALERTA_USO_CPU") && !g_str_has_prefix(line, "ALERTA_PICO_CPU") && !g_str_has_prefix(line, "ALERTA_USO_RAM") && !g_str_has_prefix(line, "ALERTA_PICO_RAM"))
         {
-            // Espera formato: ALERTA_USO_CPU: %.2f%% (PID: %s) o ALERTA_USO_Memoria: %6ld KB (PID: %s)
-            gchar tipo[32], nombre[128], pid[32], valor[32];
-            if (sscanf(line, "ALERTA_USO_CPU: %31[^%%]%% (PID: %31[^)])", valor, pid) == 2)
-            {
-                // Puedes obtener el nombre del proceso si lo incluyes en el printf de guardia_info
-                GtkTreeIter iter;
-                gtk_list_store_append(pdata->store, &iter);
-                gtk_list_store_set(pdata->store, &iter,
-                                   0, pid,   // PID
-                                   1, "CPU", // Tipo de alerta
-                                   2, valor, // Valor de CPU
-                                   -1);
-            }
-            else if (sscanf(line, "ALERTA_USO_Memoria: %31[^K] KB (PID: %31[^)])", valor, pid) == 2)
-            {
-                GtkTreeIter iter;
-                gtk_list_store_append(pdata->store, &iter);
-                gtk_list_store_set(pdata->store, &iter,
-                                   0, pid,       // PID
-                                   1, "Memoria", // Tipo de alerta
-                                   2, valor,     // Valor de Memoria
-                                   -1);
-            }
+            g_free(line);
+            return TRUE;
         }
+        gchar tipo[32] = {0};
+        gchar nombre[128] = {0};
+        gchar pid[32] = {0};
+        float valor = 0.0;
+
+        // Intentar parsear la línea con sscanf
+        // Ejemplo esperado:
+        // ALERTA_USO_CPU: 12.34% | Nombre: firefox | PID: 1234
+        int parsed = sscanf(line, "%31[^:]: %f%% | Nombre: %127[^|] | PID: %31s", tipo, &valor, nombre, pid);
+
+        if (parsed == 4)
+        {
+            // Normalizar nombre del tipo para mostrar bonito
+            gchar *tipo_mostrar = NULL;
+            if (g_strcmp0(tipo, "ALERTA_USO_CPU") == 0) tipo_mostrar = "Uso CPU";
+            else if (g_strcmp0(tipo, "ALERTA_USO_RAM") == 0) tipo_mostrar = "Uso RAM";
+            else if (g_strcmp0(tipo, "ALERTA_PICO_CPU") == 0) tipo_mostrar = "Pico CPU";
+            else if (g_strcmp0(tipo, "ALERTA_PICO_RAM") == 0) tipo_mostrar = "Pico RAM";
+            else tipo_mostrar = tipo; // fallback
+
+            GtkTreeIter iter;
+            gtk_list_store_append(pdata->store, &iter);
+            gtk_list_store_set(pdata->store, &iter,
+                               0, pid,
+                               1, tipo_mostrar,
+                               2, g_strdup_printf("%.2f%%", valor),
+                               3, nombre,
+                               -1);
+        }
+        else
+        {
+            g_print("⚠️ Línea malformada: %s", line);
+        }
+
         g_free(line);
         return TRUE;
     }
-    if (status == G_IO_STATUS_EOF)
+    else if (status == G_IO_STATUS_EOF)
     {
         return FALSE;
     }
     return TRUE;
 }
+
 
 // Callback para leer y parsear la salida de guardia_info
 gboolean read_guardia_info_table(GIOChannel *source, GIOCondition cond, gpointer data)
@@ -121,6 +182,10 @@ gboolean read_guardia_info_table(GIOChannel *source, GIOCondition cond, gpointer
     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
     if (status == G_IO_STATUS_NORMAL && line)
     {
+        if (!strchr(line, ';')) {
+            g_free(line);
+            return TRUE;
+        }
         gchar **fields = g_strsplit(line, ";", -1); // divide en todos los ';'
 
         if (fields[0] && fields[1] && fields[2] && fields[3] && fields[4] && fields[5])
@@ -202,10 +267,11 @@ void on_alertas_clicked(GtkButton *btn, gpointer user_data)
     gtk_container_add(GTK_CONTAINER(alert_window), vbox);
 
     // Modelo de la tabla (PID, Tipo, Valor)
-    GtkListStore *store = gtk_list_store_new(3,
+    GtkListStore *store = gtk_list_store_new(4,
                                              G_TYPE_STRING, // PID
                                              G_TYPE_STRING, // Tipo de alerta
-                                             G_TYPE_STRING  // Valor
+                                             G_TYPE_STRING,  // Valor
+                                             G_TYPE_STRING  // Nombre del proceso
     );
 
     GtkWidget *tree = gtk_tree_view_new_with_model(GTK_TREE_MODEL(store));
@@ -215,6 +281,7 @@ void on_alertas_clicked(GtkButton *btn, gpointer user_data)
     gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "PID", renderer, "text", 0, NULL);
     gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Tipo", renderer, "text", 1, NULL);
     gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Valor", renderer, "text", 2, NULL);
+    gtk_tree_view_insert_column_with_attributes(GTK_TREE_VIEW(tree), -1, "Nombre", renderer, "text", 3, NULL);
 
     GtkWidget *scroll = gtk_scrolled_window_new(NULL, NULL);
     gtk_container_add(GTK_CONTAINER(scroll), tree);
@@ -383,7 +450,7 @@ void on_scan_clicked(GtkButton *btn, gpointer user_data)
 gboolean realizar_escaneo_usb(gpointer data) {
     usb_scan_output = g_string_new("");
 
-    const char *usb_scanner_path = "\"../Patrullas Fronterizas/Test1\"";
+    const char *usb_scanner_path = "\"../Patrullas Fronterizas/fronteras\"";
     FILE *fp = popen(usb_scanner_path, "r");
 
     if (!fp) {
