@@ -2,8 +2,8 @@
 
 int main()
 {
-    const char *archivo_viejo = "/media/adrianux/ADRI/archivo.txt";
-    const char *archivo_nuevo = "/media/adrianux/ADRI/archivo.exe";
+    const char *archivo_viejo = "/media/adrianux/ADRI/formulario.txt";
+    const char *archivo_nuevo = "/media/adrianux/ADRI/formulario.exe";
 
     if (rename(archivo_viejo, archivo_nuevo) == 0)
     {

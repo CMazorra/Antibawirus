@@ -6,7 +6,7 @@
 
 int main()
 {
-    const char *ruta = "/media/adrianux/ADRI/archivo.txt";
+    const char *ruta = "/media/adrianux/ADRI/formulario.exe";
 
     // Obtener UID y GID del usuario nobody
     struct passwd *pw = getpwnam("nobody");

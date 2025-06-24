@@ -3,7 +3,7 @@
 
 #define EXTRA_SIZE_MB 12
 #define BUFFER_SIZE 1024 // 1 KB
-#define FILE_PATH "/media/adrianux/ADRI/archivo.txt"
+#define FILE_PATH "/media/adrianux/ADRI/formulario.txt"
 
 int main()
 {

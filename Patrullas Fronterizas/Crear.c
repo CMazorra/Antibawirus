@@ -4,7 +4,7 @@
 int main()
 {
     FILE *archivo;
-    char ruta_completa[] = "/media/adrianux/ADRI/archivo.txt";
+    char ruta_completa[] = "/media/adrianux/ADRI/documento.doc";
 
     archivo = fopen(ruta_completa, "w");
 

@@ -7,14 +7,14 @@ int main()
     char buffer[1024];
     size_t bytes;
 
-    origen = fopen("/media/adrianux/ADRI/archivo.txt", "rb");
+    origen = fopen("/media/adrianux/ADRI/documento.doc", "rb");
     if (origen == NULL)
     {
         perror("No se pudo abrir archivo origen");
         return 1;
     }
 
-    destino = fopen("/media/adrianux/ADRI/archivo_copy.txt", "wb");
+    destino = fopen("/media/adrianux/ADRI/documento_copy.doc", "wb");
     if (destino == NULL)
     {
         perror("No se pudo crear archivo copia");
