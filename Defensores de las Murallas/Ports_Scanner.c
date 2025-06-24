@@ -85,6 +85,7 @@ void *port_scanner(void *args_void) {
         args->target.sin_port = htons(port);
 
         if (connect(sock, (struct sockaddr *)&args->target, sizeof(args->target)) == 0) {
+
             int is_risk = 0;
             const char *service = get_service_name(port, &is_risk);
             

@@ -20,12 +20,12 @@ GtkWidget *entry_cpu_threshold;
 GtkWidget *entry_mem_threshold;
 GString *usb_scan_output;
 GMutex    usb_mutex;
-
-void on_hide_text(GtkButton *btn, gpointer user_data)
-{
-    gtk_widget_hide(scroll);
-    gtk_widget_hide(exit_button);
-}
+guint usb_refresh_timeout_id = 0;
+static GPid guardia_pid;
+static guint  guardia_watch_id;
+static guint  guardia_timeout_id;
+int aux = 0;
+static GPid guardia_pid = 0;
 
 typedef struct
 {
@@ -473,19 +473,34 @@ gpointer usb_scan_thread(gpointer _unused) {
     return NULL;
 }
 
-void on_scan_clicked(GtkButton *btn, gpointer user_data) {
-    gchar *snapshot;
-
-    // Toma snapshot protegido por mutex
+static gboolean refresh_usb_output(gpointer user_data) {
+    // Toma snapshot
     g_mutex_lock(&usb_mutex);
-    snapshot = g_string_free(g_string_new(usb_scan_output->str), FALSE);
+    gchar *snapshot = g_strdup(usb_scan_output->str);
     g_mutex_unlock(&usb_mutex);
 
-    gtk_widget_show(scroll);
-    gtk_widget_show(exit_button);
+    // Actualiza buffer
     gtk_text_buffer_set_text(buffer, snapshot, -1);
-
     g_free(snapshot);
+
+    // Seguir llamando
+    return G_SOURCE_CONTINUE;
+}
+
+
+void on_scan_clicked(GtkButton *btn, gpointer user_data) {
+    // Si ya había un timeout corriendo, no arrancamos otro
+    if (usb_refresh_timeout_id == 0) {
+        // Mostrar widgets
+        gtk_widget_show(scroll);
+        gtk_widget_show(exit_button);
+        // Arrancar refresco cada 1 segundo
+        usb_refresh_timeout_id = g_timeout_add_seconds(
+            1,
+            refresh_usb_output,
+            NULL
+        );
+    }
 }
 
 void on_scan_port_clicked(GtkButton *btn, gpointer user_data)
@@ -528,11 +543,192 @@ void on_scan_port_clicked(GtkButton *btn, gpointer user_data)
     pclose(fp);
 }
 
+// Lee línea a línea de guardia_info y la inserta en el buffer
+static gboolean guardia_io_cb(GIOChannel *source,
+                              GIOCondition cond,
+                              gpointer user_data)
+{
+    GtkTextBuffer *buf = GTK_TEXT_BUFFER(user_data);
+    gchar *line = NULL;
+    gsize len = 0;
+    GError *err = NULL;
+
+    // lectura de una línea
+    GIOStatus st = g_io_channel_read_line(source, &line, &len, NULL, &err);
+    if (st == G_IO_STATUS_NORMAL && line) {
+        // Filtrar solo líneas que comiencen con ALERTA_
+        if (g_str_has_prefix(line, "ALERTA_")) {
+            // insertar al final
+            gtk_text_buffer_insert_at_cursor(buf, line, -1);
+        }
+        g_free(line);
+        return TRUE;
+    }
+    // EOF o error: ya no seguimos escuchando
+    if (line) g_free(line);
+    if (err) g_error_free(err);
+    return FALSE;
+}
+
+static void print_page_cb(GtkPrintOperation *op,
+                          GtkPrintContext   *context,
+                          int                page_nr,
+                          gpointer           user_data)
+{
+    GtkTextBuffer *buffer = GTK_TEXT_BUFFER(user_data);
+    GtkTextIter start, end;
+    gtk_text_buffer_get_bounds(buffer, &start, &end);
+    gchar *text = gtk_text_buffer_get_text(buffer, &start, &end, TRUE);
+
+    PangoLayout *layout = gtk_print_context_create_pango_layout(context);
+    pango_layout_set_text(layout, text, -1);
+
+    cairo_t *cr = gtk_print_context_get_cairo_context(context);
+    cairo_move_to(cr, 50, 50);  // margen
+    pango_cairo_show_layout(cr, layout);
+
+    g_object_unref(layout);
+    g_free(text);
+}
+
+void export_to_pdf(GtkTextBuffer *buffer, const char *filename) {
+    GtkPrintOperation *op = gtk_print_operation_new();
+    gtk_print_operation_set_export_filename(op, filename);
+    gtk_print_operation_set_allow_async(op, FALSE);
+    gtk_print_operation_set_print_settings(op, NULL);
+
+    g_signal_connect(op, "draw-page", G_CALLBACK(print_page_cb), buffer);
+
+    GtkPrintOperationResult res;
+    GError *error = NULL;
+    res = gtk_print_operation_run(op,
+                GTK_PRINT_OPERATION_ACTION_EXPORT,
+                GTK_WINDOW(window),  // ventana principal
+                &error);
+    if (res == GTK_PRINT_OPERATION_RESULT_ERROR) {
+        g_warning("Error generando PDF: %s", error->message);
+        g_error_free(error);
+    }
+    g_object_unref(op);
+}
+
 void do_all(GtkButton *btn, gpointer user_data)
 {
-    on_scan_clicked(btn, user_data);
-    on_monitoring_clicked(btn, user_data);
-    on_scan_port_clicked(btn, user_data);
+    // 1) Mostrar y vaciar buffer
+    gtk_text_buffer_set_text(buffer, "", -1);
+    gtk_widget_show(scroll);
+    gtk_widget_show(exit_button);
+
+    // -----------------------------------
+    // 2) Escaneo USB (snapshot único)
+    // -----------------------------------
+    gchar *snapshot;
+    g_mutex_lock(&usb_mutex);
+      snapshot = g_strdup(usb_scan_output->str);
+    g_mutex_unlock(&usb_mutex);
+
+    gtk_text_buffer_insert_at_cursor(buffer, "==== Escaneo USB ====\n", -1);
+    gtk_text_buffer_insert_at_cursor(buffer, snapshot, -1);
+    gtk_text_buffer_insert_at_cursor(buffer, "\n", -1);
+    g_free(snapshot);
+
+    // -----------------------------------
+    // 3) Escaneo de puertos (síncrono)
+    // -----------------------------------
+    const gchar *start_text = gtk_entry_get_text(GTK_ENTRY(entry_start_port));
+    const gchar *end_text   = gtk_entry_get_text(GTK_ENTRY(entry_end_port));
+    gchar range_arg[64];
+    g_snprintf(range_arg, sizeof(range_arg), "%s-%s", start_text, end_text);
+
+    gchar cmd[256];
+    g_snprintf(cmd, sizeof(cmd),
+      "\"../Defensores de las Murallas/scanner\" %s", range_arg);
+
+    gtk_text_buffer_insert_at_cursor(buffer,
+      "==== Escaneo de Puertos ====\n", -1);
+
+    FILE *fp_ports = popen(cmd, "r");
+    if (fp_ports) {
+        char line[512];
+        while (fgets(line, sizeof(line), fp_ports)) {
+            gtk_text_buffer_insert_at_cursor(buffer, line, -1);
+        }
+        pclose(fp_ports);
+    } else {
+        gtk_text_buffer_insert_at_cursor(buffer,
+          "Error al ejecutar el escáner de puertos.\n", -1);
+    }
+    gtk_text_buffer_insert_at_cursor(buffer, "\n", -1);
+
+    // -----------------------------------
+    // 4) Alertas de procesos
+    // -----------------------------------
+    const gchar *cpu_text = gtk_entry_get_text(GTK_ENTRY(entry_cpu_threshold));
+    const gchar *mem_text = gtk_entry_get_text(GTK_ENTRY(entry_mem_threshold));
+
+    gtk_text_buffer_insert_at_cursor(buffer,
+      "==== Alertas de Procesos ====\n", -1);
+
+    gchar *argv[] = {
+        "../Guardia del tesoro real/test",
+        (gchar*)cpu_text,
+        (gchar*)mem_text,
+        NULL
+    };
+    GPid child_pid;
+    gint out_fd;
+    GError *error = NULL;
+
+    // Lanzar sincrónico pero sin bloquear: capturar solo stdout y adjuntar watcher
+    if (g_spawn_async_with_pipes(
+            NULL, argv, NULL,
+            G_SPAWN_DO_NOT_REAP_CHILD | G_SPAWN_SEARCH_PATH,
+            NULL, NULL,
+            &child_pid,
+            NULL,   // stdin
+            &out_fd,
+            NULL,   // stderr
+            &error))
+    {
+        guardia_pid = child_pid;
+        // Creamos canal para leer stdout
+        GIOChannel *ch = g_io_channel_unix_new(out_fd);
+        g_io_channel_set_flags(ch, G_IO_FLAG_NONBLOCK, NULL);
+        // Añadimos watcher que irá insertando al mismo buffer
+        g_io_add_watch(ch,
+                       G_IO_IN | G_IO_HUP,
+                       guardia_io_cb,
+                       buffer /* user_data */);
+        // opcional: guardar child_pid si quieres luego poder matarlo
+    }
+    else {
+        // Error al lanzar
+        gtk_text_buffer_insert_at_cursor(buffer,
+          "Error al ejecutar guardia_info.\n", -1);
+        if (error) g_error_free(error);
+    }
+    sleep(3);
+    if (guardia_pid > 0) {
+        kill(guardia_pid, SIGTERM);
+        guardia_pid = 0;
+    }
+    aux = 1;
+}
+
+void on_hide_text(GtkButton *btn, gpointer user_data)
+{
+    if(aux)
+    {
+        aux = 0;
+        export_to_pdf(buffer, "resultados.pdf");
+    }
+    gtk_widget_hide(scroll);
+    gtk_widget_hide(exit_button);
+
+    if (usb_refresh_timeout_id != 0) {
+        g_source_remove(usb_refresh_timeout_id);
+        usb_refresh_timeout_id = 0;
+    }
 }
 
 int main(int argc, char *argv[])

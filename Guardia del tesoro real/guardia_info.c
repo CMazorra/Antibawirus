@@ -131,7 +131,7 @@ void process_info(const char* pid, ProcessTracker *tracker)
 
  //CPU
 snprintf(path, sizeof(path), "/proc/%s/stat", pid);
-    sprintf(path, "/proc/%s/stat", pid);
+    
     file = fopen(path, "r");
     if (!file) {
         perror("Error al abrir /proc/[pid]/stat");
