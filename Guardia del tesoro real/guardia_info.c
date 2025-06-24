@@ -48,7 +48,9 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
          int num_cpus = sysconf(_SC_NPROCESSORS_ONLN);
 
          if(delta_total > 0)
-          cpu_us = ((float)delta_proc / delta_total) * num_cpus * 100.0;
+          cpu_us = ((float)delta_proc / delta_total) * 100.0;
+          if(num_cpus > 0)
+           cpu_us /= num_cpus;
 
          long mem_us = memory - tracker -> processes[i].prev_memory; 
 
@@ -56,7 +58,7 @@ void update_process(ProcessTracker *tracker, const char*pid, const char*name, lo
          {
             printf("ALERTA_PICO_CPU: %.2f%% | Nombre: %s | PID: %s\n", cpu_us - tracker->processes[i].prev_cpu, name, pid);
          }
-         if(ram_percent - tracker->processes[i].prev_ram_percent > 10.0 && !lista_blanca)
+         if(ram_percent - tracker->processes[i].prev_ram_percent > 10.0 && !lista_blanca(name))
          {
             printf("ALERTA_PICO_RAM: %.2f%% | Nombre: %s | PID: %s\n", ram_percent - tracker->processes[i].prev_ram_percent, name, pid);
          }
@@ -243,7 +245,7 @@ int main(int argc, char* argv[])
     }
     closedir(dir);
 
-    sleep(10);
+    sleep(5);
    }
    
    free(tracker.processes);

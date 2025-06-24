@@ -44,14 +44,37 @@ long get_cpu_time()
     FILE* file = fopen("/proc/stat", "r");
     if (!file)
     {
-      perror("Error al abrir /proc/stat");
-      return 0;
-    } 
+        perror("Error al abrir /proc/stat");
+        return 0;
+    }
 
-    long user, nice, system, idle;
-    fscanf(file, "cpu %ld %ld %ld %ld", &user, &nice, &system, &idle);
+    char line[1024];
+    if (!fgets(line, sizeof(line), file)) {
+        perror("Error al leer /proc/stat");
+        fclose(file);
+        return 0;
+    }
+
     fclose(file);
-    return user + nice + system + idle;
+
+    long user, nice, system, idle, iowait, irq, softirq, steal;
+    int matched = sscanf(line, "cpu %ld %ld %ld %ld %ld %ld %ld %ld",
+                         &user, &nice, &system, &idle,
+                         &iowait, &irq, &softirq, &steal);
+
+    if (matched < 4) {
+        fprintf(stderr, "Error: formato inesperado en /proc/stat\n");
+        return 0;
+    }
+
+    // Solo suma los campos disponibles según `matched`
+    long total = user + nice + system + idle;
+    if (matched >= 5) total += iowait;
+    if (matched >= 6) total += irq;
+    if (matched >= 7) total += softirq;
+    if (matched >= 8) total += steal;
+
+    return total;
 }
 
 long get_total_ram()
