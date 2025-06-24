@@ -212,7 +212,7 @@ int main(int argc, char* argv[])
       last_cleanup = time(NULL);
       // printf("\n--- Limpieza realizada. Procesos activos: %d ---\n", tracker.count);
     }
-    
+    printf("NUEVA_ITERACION\n");
     dir= opendir("/proc");
     if(!dir)
     {

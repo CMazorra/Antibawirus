@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <glib.h>
 #include <glib/gspawn.h>
+#include <locale.h>
 
 // Widgets globales para acceso desde funciones
 GtkWidget *window;
@@ -74,6 +75,12 @@ gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpoin
     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
     if (status == G_IO_STATUS_NORMAL && line)
     {
+        if (g_str_has_prefix(line, "NUEVA_ITERACION"))
+         {
+            gtk_list_store_clear(pdata->store); // Limpiar la tabla antes de agregar nueva iteración
+          return TRUE;
+          }
+
         if(!g_str_has_prefix(line, "ALERTA_USO_CPU") && !g_str_has_prefix(line, "ALERTA_PICO_CPU") && !g_str_has_prefix(line, "ALERTA_USO_RAM") && !g_str_has_prefix(line, "ALERTA_PICO_RAM"))
         {
             g_free(line);
@@ -84,13 +91,17 @@ gboolean read_guardia_alertas_table(GIOChannel *source, GIOCondition cond, gpoin
         gchar pid[32] = {0};
         float valor = 0.0;
 
-        // Intentar parsear la línea con sscanf
+        // Parsear la línea con sscanf
         // Ejemplo esperado:
         // ALERTA_USO_CPU: 12.34% | Nombre: firefox | PID: 1234
-        int parsed = sscanf(line, "%31[^:]: %f%% | Nombre: %127[^|] | PID: %31s", tipo, &valor, nombre, pid);
-
+        
+        g_strchomp(line);
+        char valor_str[32] = {0};
+        int parsed = sscanf(line, "%31[^:]: %31[^%%]%% | Nombre: %127[^|] | PID: %31s", tipo, valor_str, nombre, pid);
+        
         if (parsed == 4)
         {
+            float valor = g_ascii_strtod(valor_str, NULL);
             // Normalizar nombre del tipo para mostrar bonito
             gchar *tipo_mostrar = NULL;
             if (g_strcmp0(tipo, "ALERTA_USO_CPU") == 0) tipo_mostrar = "Uso CPU";
@@ -135,6 +146,14 @@ gboolean read_guardia_info_table(GIOChannel *source, GIOCondition cond, gpointer
     GIOStatus status = g_io_channel_read_line(source, &line, &len, NULL, &error);
     if (status == G_IO_STATUS_NORMAL && line)
     {
+
+        if (g_str_has_prefix(line, "NUEVA_ITERACION"))
+         {
+            gtk_list_store_clear(pdata->store);
+          return TRUE;
+          }
+
+        
         if (!strchr(line, ';')) {
             g_free(line);
             return TRUE;
@@ -518,6 +537,7 @@ void do_all(GtkButton *btn, gpointer user_data)
 
 int main(int argc, char *argv[])
 {
+    setlocale(LC_ALL, "C");
     gtk_init(&argc, &argv);
 
     GtkCssProvider *provider = gtk_css_provider_new();
@@ -560,21 +580,21 @@ int main(int argc, char *argv[])
     // Label and Entry for starting port
     GtkWidget *label_start = gtk_label_new("Puerto inicial:");
     entry_start_port = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_start_port), "e.g. 1");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_start_port), "ej. 1");
     gtk_grid_attach(GTK_GRID(grid), label_start, 0, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_start_port, 1, 0, 1, 1);
 
     // Label and Entry for cpu usage threshold
     GtkWidget *label_cou = gtk_label_new("Umbral de CPU (%):");
     entry_cpu_threshold = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_cpu_threshold), "e.g. 80");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_cpu_threshold), "ej. 80");
     gtk_grid_attach(GTK_GRID(grid), label_cou, 2, 0, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_cpu_threshold, 3, 0, 1, 1);
 
     // Label and Entry for ending port
     GtkWidget *label_end = gtk_label_new("Puerto final:");
     entry_end_port = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_end_port), "e.g. 1024");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_end_port), "ej. 1024");
     gtk_grid_attach(GTK_GRID(grid), label_end, 0, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_end_port, 1, 1, 1, 1);
 
@@ -582,7 +602,7 @@ int main(int argc, char *argv[])
     // GtkWidget *hbox_mem = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 5);
     GtkWidget *label_mem = gtk_label_new("Umbral de Memoria (%):");
     entry_mem_threshold = gtk_entry_new();
-    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_mem_threshold), "e.g. 90");
+    gtk_entry_set_placeholder_text(GTK_ENTRY(entry_mem_threshold), "ej. 90");
     gtk_grid_attach(GTK_GRID(grid), label_mem, 2, 1, 1, 1);
     gtk_grid_attach(GTK_GRID(grid), entry_mem_threshold, 3, 1, 1, 1);
 
