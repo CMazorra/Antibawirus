@@ -453,7 +453,7 @@ void on_monitoring_clicked(GtkButton *btn, gpointer user_data)
 }
 
 gpointer usb_scan_thread(gpointer _unused) {
-    const char *cmd = "stdbuf -oL -eL '../Patrullas Fronterizas/fronteras' 2>&1";
+    const char *cmd = "stdbuf -oL -eL '../Patrullas Fronterizas/Test' 2>&1";
     FILE *fp = popen(cmd, "r");
     if (!fp) {
         g_mutex_lock(&usb_mutex);

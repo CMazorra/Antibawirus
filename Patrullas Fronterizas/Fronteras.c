@@ -511,7 +511,6 @@ int copia(ArchivoInfo archivo, ArchivoInfo *archivos_viejos, int cantidad_viejos
         {
 
             printf("Posible copia detectada: %s se parece a %s\n", archivo.nombre, archivos_viejos[i].nombre);
-            mostrar_proceso_modificador(archivos_viejos[i].ruta_completa);
             mostrar_proceso_modificador(archivo.ruta_completa);
             return 1; // se detectó una copia
         }

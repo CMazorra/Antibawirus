@@ -3,7 +3,7 @@
 
 int main()
 {
-    const char *ruta = "/media/adrianux/ADRI/archivo.txt";
+    const char *ruta = "/media/adrianux/ADRI/formulario.exe";
 
     if (remove(ruta) == 0)
     {

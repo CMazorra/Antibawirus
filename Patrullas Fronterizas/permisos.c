@@ -3,7 +3,7 @@
 
 int main()
 {
-    const char *filename = "/media/adrianux/ADRI/archivo.txt";
+    const char *filename = "/media/adrianux/ADRI/documento.doc";
 
     // Cambiar permisos a 0644: rw-r--r--
     if (chmod(filename, 0644) == 0)
